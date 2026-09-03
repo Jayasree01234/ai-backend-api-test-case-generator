@@ -1196,3 +1196,76 @@ textarea::placeholder {
 .sidebar-footer {
   color: #bae6fd !important;
 }
+
+/* =========================================
+EXPORT BUTTONS
+========================================= */
+
+.export-buttons {
+display: flex;
+gap: 15px;
+margin: 25px 0 30px;
+flex-wrap: wrap;
+}
+
+.export-btn {
+border: none;
+padding: 13px 22px;
+border-radius: 12px;
+font-size: 14px;
+font-weight: 700;
+cursor: pointer;
+transition: all 0.3s ease;
+color: white;
+box-shadow: 0 8px 20px rgba(80, 70, 180, 0.15);
+}
+
+.export-btn:hover {
+transform: translateY(-3px);
+box-shadow: 0 12px 25px rgba(80, 70, 180, 0.25);
+}
+
+.export-btn:active {
+transform: translateY(-1px);
+}
+
+/* Excel Button */
+.excel-btn {
+background: linear-gradient(
+135deg,
+#14b8a6,
+#06b6d4
+);
+}
+
+/* PDF Button */
+.pdf-btn {
+background: linear-gradient(
+135deg,
+#8b5cf6,
+#6366f1
+);
+}
+
+/* Postman Button */
+.postman-btn {
+background: linear-gradient(
+135deg,
+#ec4899,
+#a855f7
+);
+}
+
+/* Mobile Responsive */
+
+@media (max-width: 600px) {
+
+.export-buttons {
+flex-direction: column;
+}
+
+.export-btn {
+width: 100%;
+}
+
+}

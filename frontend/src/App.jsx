@@ -2,6 +2,7 @@ import { useState } from "react";
 import "./App.css";
 
 function App() {
+
 // ================= LOGIN STATES =================
 
 const [email, setEmail] = useState("");
@@ -60,6 +61,7 @@ try {
 
   setLoggedIn(true);
   setMessage("");
+
 } catch (error) {
   setMessage("Could not connect to backend.");
 }
@@ -102,6 +104,7 @@ try {
 
   setProjectId(data.id);
   alert("Project created successfully!");
+
 } catch (error) {
   alert("Could not connect to backend.");
 }
@@ -158,6 +161,7 @@ try {
   );
 
   setImportedApis(data.apis_imported || []);
+
 } catch (error) {
   setUploadMessage("Could not connect to backend.");
 }
@@ -170,11 +174,12 @@ try {
 // =====================================================
 
 async function generateTestCases() {
-if (!projectId) {
-alert("Please create a project first.");
-return;
-}
 
+
+if (!projectId) {
+  alert("Please create a project first.");
+  return;
+}
 
 const token = localStorage.getItem("access_token");
 
@@ -199,6 +204,7 @@ try {
   }
 
   setTestCases(data.test_cases || []);
+
 } catch (error) {
   alert("Could not connect to backend.");
 } finally {
@@ -209,28 +215,124 @@ try {
 }
 
 // =====================================================
+// DOWNLOAD EXPORT
+// =====================================================
+
+const downloadExport = async (type, extension) => {
+
+
+if (!projectId) {
+  alert("Please create a project first.");
+  return;
+}
+
+const token = localStorage.getItem("access_token");
+
+try {
+
+  const response = await fetch(
+    `http://127.0.0.1:8000/projects/${projectId}/export/${type}`,
+    {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${token}`
+      }
+    }
+  );
+
+  if (!response.ok) {
+
+    const errorData = await response.json();
+
+    alert(
+      errorData.detail || "Export failed"
+    );
+
+    return;
+  }
+
+  const blob = await response.blob();
+
+  const url = window.URL.createObjectURL(blob);
+
+  const link = document.createElement("a");
+
+  link.href = url;
+
+  link.download =
+    `project_${projectId}_test_cases.${extension}`;
+
+  document.body.appendChild(link);
+
+  link.click();
+
+  document.body.removeChild(link);
+
+  window.URL.revokeObjectURL(url);
+
+} catch (error) {
+
+  console.error("Export error:", error);
+
+  alert(
+    "Export failed. Please try again."
+  );
+}
+
+
+};
+
+// =====================================================
+// EXPORT FUNCTIONS
+// =====================================================
+
+const exportExcel = () => {
+downloadExport("excel", "xlsx");
+};
+
+const exportPDF = () => {
+downloadExport("pdf", "pdf");
+};
+
+const exportPostman = () => {
+downloadExport("postman", "json");
+};
+
+// =====================================================
 // LOGIN PAGE
 // =====================================================
 
 if (!loggedIn) {
-return ( <div className="login-page"> <div className="login-background"></div>
 
+
+return (
+
+  <div className="login-page">
+
+    <div className="login-background"></div>
 
     <div className="login-card">
+
       <div className="logo">
         <div className="logo-icon">AI</div>
         <span>TestForge</span>
       </div>
 
       <div className="login-heading">
+
         <h1>Welcome Back</h1>
+
         <p>
           Sign in to continue generating intelligent API test cases.
         </p>
+
       </div>
 
+
       <form onSubmit={handleLogin}>
+
         <div className="form-group">
+
           <label>Email Address</label>
 
           <input
@@ -242,9 +344,12 @@ return ( <div className="login-page"> <div className="login-background"></div>
             }
             required
           />
+
         </div>
 
+
         <div className="form-group">
+
           <label>Password</label>
 
           <input
@@ -256,7 +361,9 @@ return ( <div className="login-page"> <div className="login-background"></div>
             }
             required
           />
+
         </div>
+
 
         <button
           type="submit"
@@ -264,18 +371,25 @@ return ( <div className="login-page"> <div className="login-background"></div>
         >
           Sign In →
         </button>
+
       </form>
 
+
       {message && (
+
         <p className="error-message">
           {message}
         </p>
+
       )}
+
 
       <p className="login-footer">
         AI Powered API Testing Platform
       </p>
+
     </div>
+
   </div>
 );
 
@@ -286,7 +400,10 @@ return ( <div className="login-page"> <div className="login-background"></div>
 // DASHBOARD
 // =====================================================
 
-return ( <div className="dashboard">
+return (
+
+
+<div className="dashboard">
 
 
   {/* ================= SIDEBAR ================= */}
@@ -294,13 +411,16 @@ return ( <div className="dashboard">
   <aside className="sidebar">
 
     <div className="brand">
+
       <div className="brand-icon">AI</div>
 
       <div>
         <h2>TestForge</h2>
         <span>AI Testing Platform</span>
       </div>
+
     </div>
+
 
     <nav className="sidebar-nav">
 
@@ -326,9 +446,13 @@ return ( <div className="dashboard">
 
     </nav>
 
+
     <div className="sidebar-footer">
+
       <div className="online-dot"></div>
+
       Backend Connected
+
     </div>
 
   </aside>
@@ -338,11 +462,13 @@ return ( <div className="dashboard">
 
   <main className="main-content">
 
+
     {/* ================= HEADER ================= */}
 
     <header className="top-header">
 
       <div>
+
         <p className="eyebrow">
           AI-POWERED TEST AUTOMATION
         </p>
@@ -356,11 +482,16 @@ return ( <div className="dashboard">
           Generate comprehensive API test cases automatically
           using intelligent analysis.
         </p>
+
       </div>
 
+
       <div className="header-status">
+
         <div className="pulse"></div>
+
         System Online
+
       </div>
 
     </header>
@@ -371,40 +502,55 @@ return ( <div className="dashboard">
     <section className="stats-grid">
 
       <div className="stat-card">
+
         <div className="stat-icon purple">
           ◈
         </div>
 
         <div>
+
           <p>Current Project</p>
+
           <h3>
             {projectId ? `#${projectId}` : "None"}
           </h3>
+
         </div>
+
       </div>
 
 
       <div className="stat-card">
+
         <div className="stat-icon blue">
           ⌘
         </div>
 
         <div>
+
           <p>APIs Imported</p>
+
           <h3>{importedApis.length}</h3>
+
         </div>
+
       </div>
 
 
       <div className="stat-card">
+
         <div className="stat-icon pink">
           ✦
         </div>
 
         <div>
+
           <p>Test Cases</p>
+
           <h3>{testCases.length}</h3>
+
         </div>
+
       </div>
 
     </section>
@@ -415,7 +561,9 @@ return ( <div className="dashboard">
     <section className="workflow-card">
 
       <div className="workflow-title">
+
         <div>
+
           <p className="eyebrow">
             WORKFLOW
           </p>
@@ -423,21 +571,29 @@ return ( <div className="dashboard">
           <h2>
             Your Testing Pipeline
           </h2>
+
         </div>
+
       </div>
+
 
       <div className="workflow">
 
+
         <div className="workflow-step completed">
+
           <div className="step-number">1</div>
 
           <div>
             <h4>Create Project</h4>
             <p>Set up your testing workspace</p>
           </div>
+
         </div>
 
+
         <div className="workflow-line"></div>
+
 
         <div
           className={`workflow-step ${
@@ -446,15 +602,19 @@ return ( <div className="dashboard">
               : ""
           }`}
         >
+
           <div className="step-number">2</div>
 
           <div>
             <h4>Import API</h4>
             <p>Upload OpenAPI specification</p>
           </div>
+
         </div>
 
+
         <div className="workflow-line"></div>
+
 
         <div
           className={`workflow-step ${
@@ -463,12 +623,14 @@ return ( <div className="dashboard">
               : ""
           }`}
         >
+
           <div className="step-number">3</div>
 
           <div>
             <h4>Generate Tests</h4>
             <p>AI creates intelligent scenarios</p>
           </div>
+
         </div>
 
       </div>
@@ -489,6 +651,7 @@ return ( <div className="dashboard">
           </div>
 
           <div>
+
             <p className="eyebrow">
               STEP 01
             </p>
@@ -498,6 +661,7 @@ return ( <div className="dashboard">
             <p>
               Start by creating a workspace for your API testing.
             </p>
+
           </div>
 
         </div>
@@ -509,6 +673,7 @@ return ( <div className="dashboard">
         >
 
           <div className="form-group">
+
             <label>Project Name</label>
 
             <input
@@ -520,19 +685,24 @@ return ( <div className="dashboard">
               }
               required
             />
+
           </div>
 
 
           <div className="form-group">
+
             <label>Project Description</label>
 
             <textarea
               placeholder="Describe what this API project is about..."
               value={projectDescription}
               onChange={(event) =>
-                setProjectDescription(event.target.value)
+                setProjectDescription(
+                  event.target.value
+                )
               }
             />
+
           </div>
 
 
@@ -540,8 +710,11 @@ return ( <div className="dashboard">
             type="submit"
             className="gradient-button"
           >
+
             Create Project
+
             <span>→</span>
+
           </button>
 
         </form>
@@ -564,6 +737,7 @@ return ( <div className="dashboard">
           </div>
 
           <div>
+
             <p className="eyebrow">
               PROJECT READY
             </p>
@@ -575,9 +749,11 @@ return ( <div className="dashboard">
             <p>
               Project ID #{projectId} is ready for API testing.
             </p>
+
           </div>
 
         </div>
+
 
         <div className="success-badge">
           Active
@@ -601,6 +777,7 @@ return ( <div className="dashboard">
           </div>
 
           <div>
+
             <p className="eyebrow">
               STEP 02
             </p>
@@ -610,6 +787,7 @@ return ( <div className="dashboard">
             <p>
               Upload your Swagger or OpenAPI JSON/YAML file.
             </p>
+
           </div>
 
         </div>
@@ -628,6 +806,7 @@ return ( <div className="dashboard">
                 )
               }
             />
+
 
             <div className="upload-visual">
 
@@ -652,8 +831,11 @@ return ( <div className="dashboard">
             type="submit"
             className="gradient-button"
           >
+
             Import API Specification
+
             <span>→</span>
+
           </button>
 
         </form>
@@ -768,6 +950,7 @@ return ( <div className="dashboard">
 
         </div>
 
+
         <div>
 
           <p className="eyebrow">
@@ -815,9 +998,40 @@ return ( <div className="dashboard">
 
           </div>
 
+
           <div className="tests-count">
             {testCases.length}
           </div>
+
+        </div>
+
+
+        {/* ================= EXPORT BUTTONS ================= */}
+
+        <div className="export-buttons">
+
+          <button
+            onClick={exportExcel}
+            className="export-btn excel-btn"
+          >
+            📊 Export Excel
+          </button>
+
+
+          <button
+            onClick={exportPDF}
+            className="export-btn pdf-btn"
+          >
+            📄 Export PDF
+          </button>
+
+
+          <button
+            onClick={exportPostman}
+            className="export-btn postman-btn"
+          >
+            ⚡ Export Postman
+          </button>
 
         </div>
 
@@ -843,6 +1057,7 @@ return ( <div className="dashboard">
                   >
                     {testCase.test_type}
                   </span>
+
 
                   <span className="test-number">
                     #{index + 1}
@@ -906,6 +1121,7 @@ return ( <div className="dashboard">
   </main>
 
 </div>
+
 
 );
 }
