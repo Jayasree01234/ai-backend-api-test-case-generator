@@ -1,5 +1,4 @@
 import json
-import re
 import requests
 
 
@@ -8,40 +7,254 @@ OLLAMA_MODEL = "llama3.2:3b"
 
 
 # ============================================================
-# CLEAN AI RESPONSE
+# HELPER: ANALYZE API STRUCTURE
 # ============================================================
 
-def clean_json_response(response_text):
-    """
-    Clean AI response and extract JSON array.
-    """
-
-    if not response_text:
-        return ""
-
-    response_text = response_text.strip()
-
-    # Remove markdown code blocks
-    response_text = re.sub(
-        r"```json",
-        "",
-        response_text,
-        flags=re.IGNORECASE
+def analyze_api_structure(
+    method: str,
+    endpoint: str,
+    request_body: str,
+    openapi_details: dict
+):
+    parameters = openapi_details.get(
+        "parameters",
+        []
     )
 
-    response_text = response_text.replace(
-        "```",
-        ""
+    if not isinstance(parameters, list):
+        parameters = []
+
+    path_parameters = []
+    query_parameters = []
+    header_parameters = []
+
+    for parameter in parameters:
+
+        if not isinstance(parameter, dict):
+            continue
+
+        parameter_location = parameter.get(
+            "in",
+            ""
+        )
+
+        if parameter_location == "path":
+            path_parameters.append(parameter)
+
+        elif parameter_location == "query":
+            query_parameters.append(parameter)
+
+        elif parameter_location == "header":
+            header_parameters.append(parameter)
+
+    request_body_details = openapi_details.get(
+        "requestBody",
+        {}
+    )
+
+    has_request_body = bool(
+        request_body_details
+    ) or bool(request_body)
+
+    return {
+        "method": method.upper(),
+        "endpoint": endpoint,
+        "path_parameters": path_parameters,
+        "query_parameters": query_parameters,
+        "header_parameters": header_parameters,
+        "has_request_body": has_request_body,
+        "request_body_details": request_body_details
+    }
+
+
+# ============================================================
+# CREATE AI PROMPT
+# ============================================================
+
+def create_prompt(api_info: dict):
+    method = api_info["method"]
+    endpoint = api_info["endpoint"]
+
+    path_parameters = api_info["path_parameters"]
+    query_parameters = api_info["query_parameters"]
+    header_parameters = api_info["header_parameters"]
+
+    has_request_body = api_info["has_request_body"]
+    request_body_details = api_info[
+        "request_body_details"
+    ]
+
+    prompt = f"""
+You are an expert API QA engineer.
+
+Generate intelligent and relevant test cases ONLY for the API described below.
+
+API INFORMATION:
+
+HTTP Method: {method}
+Endpoint: {endpoint}
+
+PATH PARAMETERS:
+{json.dumps(path_parameters, indent=2)}
+
+QUERY PARAMETERS:
+{json.dumps(query_parameters, indent=2)}
+
+HEADER PARAMETERS:
+{json.dumps(header_parameters, indent=2)}
+
+HAS REQUEST BODY:
+{has_request_body}
+
+REQUEST BODY DETAILS:
+{json.dumps(request_body_details, indent=2)}
+
+IMPORTANT RULES:
+
+1. Generate test cases ONLY relevant to this specific API.
+2. Do NOT invent parameters that do not exist.
+3. If there are NO path parameters, do NOT generate path parameter tests.
+4. If there are NO query parameters, do NOT generate query parameter tests.
+5. If there is NO request body, do NOT generate JSON body validation tests.
+6. For POST, PUT, or PATCH APIs with a request body, generate validation tests for required fields and invalid values.
+7. For GET APIs, focus on endpoint behavior and existing parameters.
+8. For endpoints containing path parameters such as {{id}}, generate valid, invalid, missing, and boundary tests where relevant.
+9. Generate positive, negative, boundary, validation, and security tests only when applicable.
+10. Do not generate duplicate test cases.
+11. Every test case must be meaningful and realistic.
+
+Return ONLY valid JSON.
+
+Use exactly this format:
+
+{{
+  "test_cases": [
+    {{
+      "title": "Short test case title",
+      "method": "{method}",
+      "endpoint": "{endpoint}",
+      "test_type": "Positive",
+      "description": "What is being tested",
+      "request_data": "Example request data or parameter value",
+      "expected_result": "Expected API response"
+    }}
+  ]
+}}
+
+Generate between 5 and 10 relevant test cases.
+"""
+
+    return prompt
+
+
+# ============================================================
+# VALIDATE TEST CASE
+# ============================================================
+
+def validate_test_case(
+    test_case: dict,
+    method: str,
+    endpoint: str
+):
+    if not isinstance(test_case, dict):
+        return None
+
+    title = str(
+        test_case.get("title", "")
     ).strip()
 
-    # Find JSON array
-    start = response_text.find("[")
-    end = response_text.rfind("]")
+    description = str(
+        test_case.get("description", "")
+    ).strip()
 
-    if start != -1 and end != -1:
-        response_text = response_text[start:end + 1]
+    expected_result = str(
+        test_case.get("expected_result", "")
+    ).strip()
 
-    return response_text
+    test_type = str(
+        test_case.get("test_type", "")
+    ).strip()
+
+    request_data = test_case.get(
+        "request_data",
+        ""
+    )
+
+    if isinstance(
+        request_data,
+        (dict, list)
+    ):
+        request_data = json.dumps(
+            request_data
+        )
+
+    else:
+        request_data = str(
+            request_data
+        )
+
+    if not title:
+        return None
+
+    if not description:
+        return None
+
+    if not expected_result:
+        return None
+
+    if not test_type:
+        test_type = "Functional"
+
+    allowed_types = {
+        "Positive",
+        "Negative",
+        "Boundary",
+        "Validation",
+        "Security",
+        "Functional"
+    }
+
+    if test_type not in allowed_types:
+        test_type = "Functional"
+
+    return {
+        "title": title,
+        "method": method.upper(),
+        "endpoint": endpoint,
+        "test_type": test_type,
+        "description": description,
+        "request_data": request_data,
+        "expected_result": expected_result
+    }
+
+
+# ============================================================
+# REMOVE DUPLICATE TEST CASES
+# ============================================================
+
+def remove_duplicates(test_cases: list):
+    unique_test_cases = []
+    seen = set()
+
+    for test_case in test_cases:
+
+        key = (
+            test_case.get("title", "").lower(),
+            test_case.get("method", "").upper(),
+            test_case.get("endpoint", ""),
+            test_case.get("test_type", "").lower()
+        )
+
+        if key in seen:
+            continue
+
+        seen.add(key)
+
+        unique_test_cases.append(
+            test_case
+        )
+
+    return unique_test_cases
 
 
 # ============================================================
@@ -49,401 +262,180 @@ def clean_json_response(response_text):
 # ============================================================
 
 def generate_ai_test_cases(
-    method,
-    endpoint,
-    request_body="",
-    openapi_details=None
+    method: str,
+    endpoint: str,
+    request_body: str = "",
+    openapi_details: dict = None
 ):
-    """
-    Generate API test cases using Ollama AI.
-    """
-
-    method = method.upper()
-
     if openapi_details is None:
         openapi_details = {}
 
-    # Convert OpenAPI details safely
-    try:
-        openapi_text = json.dumps(
-            openapi_details,
-            indent=2
-        )
-    except Exception:
-        openapi_text = "{}"
+    if not isinstance(openapi_details, dict):
+        openapi_details = {}
 
-    # ========================================================
-    # AI PROMPT
-    # ========================================================
+    # --------------------------------------------------------
+    # ANALYZE API STRUCTURE
+    # --------------------------------------------------------
 
-    prompt = f"""
-You are an expert API QA engineer.
+    api_info = analyze_api_structure(
+        method=method,
+        endpoint=endpoint,
+        request_body=request_body,
+        openapi_details=openapi_details
+    )
 
-Generate realistic, unique, and technically correct API test cases.
+    # --------------------------------------------------------
+    # CREATE PROMPT
+    # --------------------------------------------------------
 
-API INFORMATION:
+    prompt = create_prompt(
+        api_info
+    )
 
-HTTP Method: {method}
+    payload = {
+        "model": OLLAMA_MODEL,
+        "prompt": prompt,
+        "stream": False,
+        "format": "json",
+        "options": {
+            "temperature": 0.2
+        }
+    }
 
-Endpoint: {endpoint}
-
-Request Body:
-{request_body}
-
-OpenAPI Details:
-{openapi_text}
-
-
-IMPORTANT RULES:
-
-1. Generate ONLY relevant test cases for this API.
-
-2. Never generate duplicate test cases.
-
-3. Never repeat the same test case title.
-
-4. GET and DELETE APIs usually do NOT use JSON request bodies.
-
-For GET or DELETE APIs:
-DO NOT generate:
-- Invalid JSON
-- Missing JSON
-- Invalid JSON format
-- Empty request body
-- Missing request body
-
-Unless the OpenAPI specification explicitly defines a request body.
-
-5. For GET APIs focus on:
-- Valid request
-- Valid path parameters
-- Invalid path parameters
-- Query parameter validation
-- Missing required parameters
-- Boundary values
-- Non-existing resources
-- Unauthorized access
-
-6. For POST APIs focus on:
-- Valid request
-- Missing required fields
-- Invalid field formats
-- Empty request body
-- Invalid JSON
-- Boundary values
-- Validation errors
-- Duplicate data when relevant
-- Unauthorized access
-- Security validation
-
-7. For PUT and PATCH APIs focus on:
-- Valid update
-- Invalid update data
-- Missing required fields
-- Invalid formats
-- Boundary values
-- Non-existing resource
-- Unauthorized access
-
-8. If the endpoint contains a path parameter such as:
-
-/users/{{id}}
-
-Generate tests such as:
-- Valid ID
-- Invalid ID format
-- Non-existing ID
-- Minimum boundary ID
-- Maximum boundary ID
-
-9. Security test cases must be meaningful.
-
-Examples:
-- Unauthorized request
-- Invalid authentication token
-- SQL injection attempt
-- Malicious input validation
-
-10. Do NOT generate meaningless test cases.
-
-11. Generate between 6 and 10 unique test cases.
-
-
-IMPORTANT JSON RULE:
-
-Return ONLY valid JSON.
-
-Do not add explanations.
-Do not add markdown.
-Do not use ```json.
-Do not use text before or after JSON.
-
-All JSON values MUST be inside double quotes.
-
-
-Return exactly this structure:
-
-[
-  {{
-    "title": "Valid request",
-    "method": "{method}",
-    "endpoint": "{endpoint}",
-    "test_type": "Positive",
-    "description": "Verify that a valid request is accepted.",
-    "request_data": "",
-    "expected_result": "API should return a successful response."
-  }}
-]
-
-Allowed test_type values:
-
-"Positive"
-"Negative"
-"Boundary"
-"Validation"
-"Security"
-"""
+    # --------------------------------------------------------
+    # CALL OLLAMA
+    # --------------------------------------------------------
 
     try:
-
-        # ====================================================
-        # CALL OLLAMA
-        # ====================================================
 
         response = requests.post(
             OLLAMA_URL,
-            json={
-                "model": OLLAMA_MODEL,
-                "prompt": prompt,
-                "stream": False
-            },
-            timeout=180
+            json=payload,
+            timeout=120
         )
 
         response.raise_for_status()
 
-        result = response.json()
+    except requests.exceptions.ConnectionError as exc:
 
-        ai_response = result.get(
+        raise RuntimeError(
+            "Cannot connect to Ollama. "
+            "Make sure Ollama is running."
+        ) from exc
+
+    except requests.exceptions.Timeout as exc:
+
+        raise RuntimeError(
+            "AI generation timed out."
+        ) from exc
+
+    except requests.exceptions.RequestException as exc:
+
+        raise RuntimeError(
+            f"Ollama request failed: {str(exc)}"
+        ) from exc
+
+    # --------------------------------------------------------
+    # READ RESPONSE
+    # --------------------------------------------------------
+
+    try:
+
+        ollama_response = response.json()
+
+        ai_response = ollama_response.get(
             "response",
             ""
         )
 
-        print("\n================ AI RESPONSE ================\n")
-        print(ai_response)
-        print("\n=============================================\n")
+        if not ai_response:
+            raise ValueError(
+                "Empty AI response"
+            )
 
-        # ====================================================
-        # CLEAN RESPONSE
-        # ====================================================
+    except (
+        ValueError,
+        json.JSONDecodeError
+    ) as exc:
 
-        cleaned_response = clean_json_response(
+        raise RuntimeError(
+            "Invalid response received from Ollama."
+        ) from exc
+
+    # --------------------------------------------------------
+    # PARSE AI JSON
+    # --------------------------------------------------------
+
+    try:
+
+        parsed_response = json.loads(
             ai_response
         )
 
-        # ====================================================
-        # PARSE JSON SAFELY
-        # ====================================================
+    except json.JSONDecodeError as exc:
 
-        try:
+        raise RuntimeError(
+            f"AI returned invalid JSON: {str(exc)}"
+        ) from exc
 
-            test_cases = json.loads(
-                cleaned_response
-            )
+    # --------------------------------------------------------
+    # GET TEST CASE LIST
+    # --------------------------------------------------------
 
-        except json.JSONDecodeError as e:
+    if isinstance(parsed_response, dict):
 
-            print(
-                "Invalid AI JSON Response:",
-                str(e)
-            )
-
-            print(
-                "Cleaned Response:"
-            )
-
-            print(
-                cleaned_response
-            )
-
-            # Do not crash the entire application
-            return []
-
-        # ====================================================
-        # VALIDATE RESPONSE
-        # ====================================================
-
-        if not isinstance(
-            test_cases,
-            list
-        ):
-            print(
-                "AI response is not a list."
-            )
-
-            return []
-
-        # ====================================================
-        # REMOVE DUPLICATES
-        # ====================================================
-
-        unique_test_cases = []
-
-        seen_titles = set()
-
-        for test_case in test_cases:
-
-            if not isinstance(
-                test_case,
-                dict
-            ):
-                continue
-
-            title = (
-                test_case.get(
-                    "title",
-                    ""
-                )
-                .strip()
-            )
-
-            if not title:
-                continue
-
-            normalized_title = (
-                title.lower()
-            )
-
-            # Skip duplicate titles
-            if normalized_title in seen_titles:
-                continue
-
-            seen_titles.add(
-                normalized_title
-            )
-
-            # Force correct API information
-            test_case["method"] = method
-
-            test_case["endpoint"] = endpoint
-
-            # Ensure test_type exists
-            if not test_case.get(
-                "test_type"
-            ):
-                test_case[
-                    "test_type"
-                ] = "Positive"
-
-            # Ensure required fields exist
-            test_case.setdefault(
-                "description",
-                ""
-            )
-
-            test_case.setdefault(
-                "request_data",
-                ""
-            )
-
-            test_case.setdefault(
-                "expected_result",
-                ""
-            )
-
-            unique_test_cases.append(
-                test_case
-            )
-
-        # ====================================================
-        # FILTER INVALID TESTS FOR GET / DELETE
-        # ====================================================
-
-        if method in [
-            "GET",
-            "DELETE"
-        ]:
-
-            invalid_keywords = [
-                "invalid json",
-                "missing json",
-                "json format",
-                "empty request body",
-                "missing request body"
-            ]
-
-            filtered_test_cases = []
-
-            for test_case in unique_test_cases:
-
-                title = test_case.get(
-                    "title",
-                    ""
-                ).lower()
-
-                description = test_case.get(
-                    "description",
-                    ""
-                ).lower()
-
-                request_data = str(
-                    test_case.get(
-                        "request_data",
-                        ""
-                    )
-                ).lower()
-
-                combined_text = (
-                    title
-                    + " "
-                    + description
-                    + " "
-                    + request_data
-                )
-
-                # Remove irrelevant JSON tests
-                if any(
-                    keyword in combined_text
-                    for keyword in invalid_keywords
-                ):
-                    continue
-
-                filtered_test_cases.append(
-                    test_case
-                )
-
-            unique_test_cases = (
-                filtered_test_cases
-            )
-
-        # ====================================================
-        # LIMIT TEST CASES
-        # ====================================================
-
-        return unique_test_cases[:10]
-
-    except requests.exceptions.ConnectionError:
-
-        print(
-            "Ollama is not running or cannot be reached."
+        ai_test_cases = parsed_response.get(
+            "test_cases",
+            []
         )
 
-        return []
+    elif isinstance(parsed_response, list):
 
-    except requests.exceptions.Timeout:
+        ai_test_cases = parsed_response
 
-        print(
-            "Ollama request timed out."
+    else:
+
+        ai_test_cases = []
+
+    if not isinstance(ai_test_cases, list):
+        ai_test_cases = []
+
+    # --------------------------------------------------------
+    # VALIDATE GENERATED TEST CASES
+    # --------------------------------------------------------
+
+    valid_test_cases = []
+
+    for test_case in ai_test_cases:
+
+        validated_case = validate_test_case(
+            test_case=test_case,
+            method=method,
+            endpoint=endpoint
         )
 
-        return []
+        if validated_case:
+            valid_test_cases.append(
+                validated_case
+            )
 
-    except Exception as e:
+    # --------------------------------------------------------
+    # REMOVE DUPLICATES
+    # --------------------------------------------------------
 
-        print(
-            "AI Generation Error:",
-            str(e)
+    valid_test_cases = remove_duplicates(
+        valid_test_cases
+    )
+
+    # --------------------------------------------------------
+    # ENSURE AI GENERATED RESULTS
+    # --------------------------------------------------------
+
+    if not valid_test_cases:
+
+        raise RuntimeError(
+            "AI did not generate valid test cases "
+            "for this API."
         )
 
-        # Prevent 500 error
-        return []
+    return valid_test_cases

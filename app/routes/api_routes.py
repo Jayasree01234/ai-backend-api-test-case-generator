@@ -1,6 +1,6 @@
 import json
-
 import yaml
+
 from fastapi import (
     APIRouter,
     Depends,
@@ -8,6 +8,7 @@ from fastapi import (
     HTTPException,
     UploadFile
 )
+
 from sqlalchemy.orm import Session
 
 from app import models, schemas
@@ -52,7 +53,7 @@ def get_user_project(
 
 
 # ============================================================
-# CREATE API
+# CREATE API MANUALLY
 # ============================================================
 
 @router.post(
@@ -145,6 +146,7 @@ async def import_openapi(
     # --------------------------------------------------------
 
     try:
+
         if filename.lower().endswith(".json"):
             specification = json.loads(
                 contents.decode("utf-8")
@@ -174,6 +176,7 @@ async def import_openapi(
         UnicodeDecodeError,
         yaml.YAMLError
     ) as exc:
+
         raise HTTPException(
             status_code=400,
             detail="Invalid OpenAPI file"
@@ -222,6 +225,28 @@ async def import_openapi(
         if not isinstance(endpoint_data, dict):
             continue
 
+        # ----------------------------------------------------
+        # GET PATH-LEVEL PARAMETERS
+        #
+        # Example:
+        # /users/{id}
+        # parameters:
+        #   - name: id
+        #     in: path
+        # ----------------------------------------------------
+
+        path_level_parameters = endpoint_data.get(
+            "parameters",
+            []
+        )
+
+        if not isinstance(path_level_parameters, list):
+            path_level_parameters = []
+
+        # ----------------------------------------------------
+        # PROCESS EACH HTTP METHOD
+        # ----------------------------------------------------
+
         for method, method_data in endpoint_data.items():
 
             if method.lower() not in supported_methods:
@@ -247,6 +272,7 @@ async def import_openapi(
                     request_body = json.dumps(
                         request_body_data
                     )
+
                 except (TypeError, ValueError):
                     request_body = str(
                         request_body_data
@@ -258,18 +284,82 @@ async def import_openapi(
 
             openapi_details = {}
 
+            # Request Body
             if request_body_data:
                 openapi_details["requestBody"] = (
                     request_body_data
                 )
 
-            parameters = method_data.get(
+            # ------------------------------------------------
+            # COMBINE PATH-LEVEL + METHOD-LEVEL PARAMETERS
+            # ------------------------------------------------
+
+            method_level_parameters = method_data.get(
                 "parameters",
                 []
             )
 
-            if isinstance(parameters, list) and parameters:
-                openapi_details["parameters"] = parameters
+            if not isinstance(
+                method_level_parameters,
+                list
+            ):
+                method_level_parameters = []
+
+            parameters = []
+
+            # Add path-level parameters first
+            parameters.extend(
+                path_level_parameters
+            )
+
+            # Add method-level parameters
+            parameters.extend(
+                method_level_parameters
+            )
+
+            # Remove duplicate parameters
+            unique_parameters = []
+            seen_parameters = set()
+
+            for parameter in parameters:
+
+                if not isinstance(parameter, dict):
+                    continue
+
+                parameter_name = parameter.get(
+                    "name",
+                    ""
+                )
+
+                parameter_location = parameter.get(
+                    "in",
+                    ""
+                )
+
+                parameter_key = (
+                    parameter_name,
+                    parameter_location
+                )
+
+                if parameter_key in seen_parameters:
+                    continue
+
+                seen_parameters.add(
+                    parameter_key
+                )
+
+                unique_parameters.append(
+                    parameter
+                )
+
+            if unique_parameters:
+                openapi_details["parameters"] = (
+                    unique_parameters
+                )
+
+            # ------------------------------------------------
+            # RESPONSES
+            # ------------------------------------------------
 
             responses = method_data.get(
                 "responses",
@@ -277,7 +367,13 @@ async def import_openapi(
             )
 
             if isinstance(responses, dict) and responses:
-                openapi_details["responses"] = responses
+                openapi_details["responses"] = (
+                    responses
+                )
+
+            # ------------------------------------------------
+            # ADDITIONAL API INFORMATION
+            # ------------------------------------------------
 
             for key in (
                 "summary",
@@ -285,8 +381,15 @@ async def import_openapi(
                 "operationId",
                 "tags"
             ):
+
                 if key in method_data:
-                    openapi_details[key] = method_data[key]
+                    openapi_details[key] = (
+                        method_data[key]
+                    )
+
+            # ------------------------------------------------
+            # CONVERT OPENAPI DETAILS TO JSON
+            # ------------------------------------------------
 
             openapi_details_json = json.dumps(
                 openapi_details
@@ -327,7 +430,7 @@ async def import_openapi(
         )
 
     # --------------------------------------------------------
-    # SAVE
+    # SAVE DATABASE
     # --------------------------------------------------------
 
     db.commit()
