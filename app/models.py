@@ -1,30 +1,67 @@
-from sqlalchemy import Column, Integer, String, ForeignKey
+from sqlalchemy import Column, Integer, String, ForeignKey, Text
 from sqlalchemy.orm import relationship
 
 from app.database import Base
 
 
+# ============================================================
+# USER MODEL
+# ============================================================
+
 class User(Base):
     __tablename__ = "users"
 
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, nullable=False)
-    email = Column(String, unique=True, index=True, nullable=False)
-    password = Column(String, nullable=False)
+    id = Column(
+        Integer,
+        primary_key=True,
+        index=True
+    )
+
+    name = Column(
+        String,
+        nullable=False
+    )
+
+    email = Column(
+        String,
+        unique=True,
+        index=True,
+        nullable=False
+    )
+
+    password = Column(
+        String,
+        nullable=False
+    )
 
     projects = relationship(
         "Project",
-        back_populates="owner",
-        cascade="all, delete-orphan"
+        back_populates="owner"
     )
 
+
+# ============================================================
+# PROJECT MODEL
+# ============================================================
 
 class Project(Base):
     __tablename__ = "projects"
 
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, nullable=False)
-    description = Column(String, nullable=True)
+    id = Column(
+        Integer,
+        primary_key=True,
+        index=True
+    )
+
+    name = Column(
+        String,
+        nullable=False
+    )
+
+    description = Column(
+        String,
+        nullable=True
+    )
 
     owner_id = Column(
         Integer,
@@ -44,10 +81,18 @@ class Project(Base):
     )
 
 
+# ============================================================
+# API MODEL
+# ============================================================
+
 class API(Base):
     __tablename__ = "apis"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(
+        Integer,
+        primary_key=True,
+        index=True
+    )
 
     project_id = Column(
         Integer,
@@ -55,10 +100,25 @@ class API(Base):
         nullable=False
     )
 
-    method = Column(String, nullable=False)
-    endpoint = Column(String, nullable=False)
-    request_body = Column(String, nullable=True)
-    openapi_details = Column(String, nullable=True)
+    method = Column(
+        String,
+        nullable=False
+    )
+
+    endpoint = Column(
+        String,
+        nullable=False
+    )
+
+    request_body = Column(
+        Text,
+        nullable=True
+    )
+
+    openapi_details = Column(
+        Text,
+        nullable=True
+    )
 
     project = relationship(
         "Project",
@@ -72,10 +132,18 @@ class API(Base):
     )
 
 
+# ============================================================
+# TEST CASE MODEL
+# ============================================================
+
 class TestCase(Base):
     __tablename__ = "test_cases"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(
+        Integer,
+        primary_key=True,
+        index=True
+    )
 
     api_id = Column(
         Integer,
@@ -83,17 +151,60 @@ class TestCase(Base):
         nullable=False
     )
 
-    title = Column(String, nullable=False)
-    method = Column(String, nullable=False)
-    endpoint = Column(String, nullable=False)
-    test_type = Column(String, nullable=False)
-    description = Column(String, nullable=False)
-    request_data = Column(String, nullable=True)
-    expected_result = Column(String, nullable=False)
+    title = Column(
+        String,
+        nullable=False
+    )
 
-    test_code = Column(String, nullable=True)
-    actual_result = Column(String, nullable=True)
+    method = Column(
+        String,
+        nullable=False
+    )
 
+    endpoint = Column(
+        String,
+        nullable=False
+    )
+
+    test_type = Column(
+        String,
+        nullable=True
+    )
+
+    description = Column(
+        Text,
+        nullable=True
+    )
+
+    request_data = Column(
+        Text,
+        nullable=True
+    )
+
+    expected_result = Column(
+        Text,
+        nullable=True
+    )
+
+    # Expected HTTP status returned by the API
+    expected_status_code = Column(
+        Integer,
+        nullable=True
+    )
+
+    # Generated executable Python test code
+    test_code = Column(
+        Text,
+        nullable=True
+    )
+
+    # Actual response received after executing the test
+    actual_result = Column(
+        Text,
+        nullable=True
+    )
+
+    # PASS / FAIL / NOT RUN
     execution_status = Column(
         String,
         nullable=True,

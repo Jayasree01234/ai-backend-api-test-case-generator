@@ -8,7 +8,6 @@ from app.auth import get_current_user
 from app.database import get_db
 from app.ai.generator import generate_ai_test_cases
 
-# NEW IMPORTS
 from app.test_executor import (
     generate_test_code,
     execute_test_case
@@ -65,7 +64,9 @@ def get_my_projects(
 ):
     projects = (
         db.query(models.Project)
-        .filter(models.Project.owner_id == current_user.id)
+        .filter(
+            models.Project.owner_id == current_user.id
+        )
         .all()
     )
 
@@ -111,16 +112,25 @@ def generate_test_cases(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
+    # --------------------------------------------------------
+    # CHECK PROJECT ACCESS
+    # --------------------------------------------------------
+
     project = get_user_project(
         project_id,
         db,
         current_user
     )
 
-    # Get APIs
+    # --------------------------------------------------------
+    # GET APIs BELONGING TO PROJECT
+    # --------------------------------------------------------
+
     apis = (
         db.query(models.API)
-        .filter(models.API.project_id == project.id)
+        .filter(
+            models.API.project_id == project.id
+        )
         .all()
     )
 
@@ -130,13 +140,23 @@ def generate_test_cases(
             detail="No APIs found in this project"
         )
 
-    # Delete previous test cases
-    api_ids = [api.id for api in apis]
+    # --------------------------------------------------------
+    # DELETE OLD TEST CASES
+    # --------------------------------------------------------
+
+    api_ids = [
+        api.id
+        for api in apis
+    ]
 
     (
         db.query(models.TestCase)
-        .filter(models.TestCase.api_id.in_(api_ids))
-        .delete(synchronize_session=False)
+        .filter(
+            models.TestCase.api_id.in_(api_ids)
+        )
+        .delete(
+            synchronize_session=False
+        )
     )
 
     db.flush()
@@ -149,14 +169,23 @@ def generate_test_cases(
 
     for api in apis:
 
+        # ----------------------------------------------------
+        # READ OPENAPI DETAILS
+        # ----------------------------------------------------
+
         openapi_details = {}
 
         if api.openapi_details:
+
             try:
                 openapi_details = json.loads(
                     api.openapi_details
                 )
-            except (json.JSONDecodeError, TypeError):
+
+            except (
+                json.JSONDecodeError,
+                TypeError
+            ):
                 openapi_details = {}
 
         # ----------------------------------------------------
@@ -164,6 +193,7 @@ def generate_test_cases(
         # ----------------------------------------------------
 
         try:
+
             ai_test_cases = generate_ai_test_cases(
                 method=api.method,
                 endpoint=api.endpoint,
@@ -172,6 +202,7 @@ def generate_test_cases(
             )
 
         except Exception as exc:
+
             db.rollback()
 
             raise HTTPException(
@@ -188,7 +219,61 @@ def generate_test_cases(
 
         for test_case in ai_test_cases:
 
+            # ------------------------------------------------
+            # REQUEST DATA
+            # ------------------------------------------------
+
+            request_data = test_case.get(
+                "request_data",
+                ""
+            )
+
+            # If AI returns a dictionary/list,
+            # convert it to JSON text for SQLite.
+            if isinstance(
+                request_data,
+                (dict, list)
+            ):
+                request_data = json.dumps(
+                    request_data
+                )
+
+            elif request_data is None:
+                request_data = ""
+
+            else:
+                request_data = str(
+                    request_data
+                )
+
+            # ------------------------------------------------
+            # EXPECTED STATUS CODE
+            # ------------------------------------------------
+
+            expected_status_code = test_case.get(
+                "expected_status_code"
+            )
+
+            try:
+
+                if expected_status_code is not None:
+                    expected_status_code = int(
+                        expected_status_code
+                    )
+
+            except (
+                TypeError,
+                ValueError
+            ):
+
+                expected_status_code = None
+
+            # ------------------------------------------------
+            # CREATE DATABASE TEST CASE
+            # ------------------------------------------------
+
             database_test_case = models.TestCase(
+
                 api_id=api.id,
 
                 title=test_case.get(
@@ -216,72 +301,134 @@ def generate_test_cases(
                     ""
                 ),
 
-                request_data=test_case.get(
-                    "request_data",
-                    ""
-                ),
+                request_data=request_data,
 
                 expected_result=test_case.get(
                     "expected_result",
                     ""
                 ),
 
+                expected_status_code=expected_status_code,
+
                 execution_status="NOT RUN"
             )
 
             # ------------------------------------------------
-            # GENERATE PYTHON TEST CODE
+            # GENERATE EXECUTABLE PYTHON CODE
             # ------------------------------------------------
 
-            database_test_case.test_code = generate_test_code(
+            try:
+
+                database_test_case.test_code = (
+                    generate_test_code(
+                        database_test_case
+                    )
+                )
+
+            except Exception as exc:
+
+                database_test_case.test_code = (
+                    "# Test code generation failed\n"
+                    f"# Error: {str(exc)}"
+                )
+
+            # ------------------------------------------------
+            # SAVE TEST CASE TEMPORARILY
+            # ------------------------------------------------
+
+            db.add(
                 database_test_case
             )
 
-            # Save temporarily to database
-            db.add(database_test_case)
             db.flush()
 
             # ------------------------------------------------
-            # EXECUTE THE TEST
+            # EXECUTE TEST
             # ------------------------------------------------
 
-            execution_result = execute_test_case(
-                database_test_case
-            )
+            try:
 
-            database_test_case.actual_result = (
-                execution_result["actual_result"]
-            )
+                execution_result = (
+                    execute_test_case(
+                        database_test_case
+                    )
+                )
 
-            database_test_case.execution_status = (
-                execution_result["execution_status"]
-            )
+                database_test_case.actual_result = (
+                    execution_result.get(
+                        "actual_result",
+                        ""
+                    )
+                )
+
+                database_test_case.execution_status = (
+                    execution_result.get(
+                        "execution_status",
+                        "NOT RUN"
+                    )
+                )
+
+            except Exception as exc:
+
+                database_test_case.actual_result = (
+                    f"Execution failed: {str(exc)}"
+                )
+
+                database_test_case.execution_status = (
+                    "FAIL"
+                )
 
             # ------------------------------------------------
-            # ADD RESULT FOR FRONTEND
+            # ADD COMPLETE RESULT TO RESPONSE
             # ------------------------------------------------
 
             generated_test_cases.append(
                 {
+                    "id": database_test_case.id,
+
+                    "api_id": database_test_case.api_id,
+
                     "title": database_test_case.title,
+
                     "method": database_test_case.method,
+
                     "endpoint": database_test_case.endpoint,
+
                     "test_type": database_test_case.test_type,
+
                     "description": database_test_case.description,
+
                     "request_data": database_test_case.request_data,
+
                     "expected_result": database_test_case.expected_result,
 
-                    "test_code": database_test_case.test_code,
-                    "actual_result": database_test_case.actual_result,
-                    "execution_status": database_test_case.execution_status
+                    "expected_status_code": (
+                        database_test_case.expected_status_code
+                    ),
+
+                    "test_code": (
+                        database_test_case.test_code
+                    ),
+
+                    "actual_result": (
+                        database_test_case.actual_result
+                    ),
+
+                    "execution_status": (
+                        database_test_case.execution_status
+                    )
                 }
             )
 
     # ========================================================
-    # SAVE EVERYTHING
+    # COMMIT ALL TEST CASES
     # ========================================================
 
     db.commit()
+
+    # ========================================================
+    # RETURN GENERATED TEST CASES
+    # ========================================================
 
     return {
         "project_id": project.id,
@@ -302,26 +449,45 @@ def get_test_cases(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
+    # --------------------------------------------------------
+    # CHECK PROJECT ACCESS
+    # --------------------------------------------------------
+
     project = get_user_project(
         project_id,
         db,
         current_user
     )
 
+    # --------------------------------------------------------
+    # GET PROJECT APIs
+    # --------------------------------------------------------
+
     apis = (
         db.query(models.API)
-        .filter(models.API.project_id == project.id)
+        .filter(
+            models.API.project_id == project.id
+        )
         .all()
     )
 
     if not apis:
         return []
 
-    api_ids = [api.id for api in apis]
+    # --------------------------------------------------------
+    # GET TEST CASES
+    # --------------------------------------------------------
+
+    api_ids = [
+        api.id
+        for api in apis
+    ]
 
     test_cases = (
         db.query(models.TestCase)
-        .filter(models.TestCase.api_id.in_(api_ids))
+        .filter(
+            models.TestCase.api_id.in_(api_ids)
+        )
         .all()
     )
 
