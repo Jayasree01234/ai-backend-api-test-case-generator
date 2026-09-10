@@ -76,6 +76,11 @@ class TestCaseResponse(BaseModel):
     request_data: str | None = None
     expected_result: str
 
+    # New fields
+    test_code: str | None = None
+    actual_result: str | None = None
+    execution_status: str | None = None
+
     class Config:
         from_attributes = True
 
@@ -88,6 +93,11 @@ class GeneratedTestCase(BaseModel):
     description: str
     request_data: str | None = None
     expected_result: str
+
+    # New fields
+    test_code: str | None = None
+    actual_result: str | None = None
+    execution_status: str | None = None
 
 
 class GenerateResponse(BaseModel):

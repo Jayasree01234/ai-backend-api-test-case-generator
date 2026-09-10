@@ -1,15 +1,34 @@
 import sqlite3
 
-conn = sqlite3.connect("app.db")
-cursor = conn.cursor()
+DATABASE = "app.db"
 
-print("Current test_cases columns:")
 
-columns = cursor.execute(
-    "PRAGMA table_info(test_cases)"
-).fetchall()
+def add_column(cursor, table, column_definition):
+    try:
+        cursor.execute(
+            f"ALTER TABLE {table} ADD COLUMN {column_definition}"
+        )
+        print(f"Added: {column_definition}")
 
-for column in columns:
-    print(column)
+    except sqlite3.OperationalError as error:
+        if "duplicate column name" in str(error):
+            print(f"Already exists: {column_definition}")
+        else:
+            raise
 
-conn.close()
+
+connection = sqlite3.connect(DATABASE)
+cursor = connection.cursor()
+
+add_column(cursor, "test_cases", "test_code TEXT")
+add_column(cursor, "test_cases", "actual_result TEXT")
+add_column(
+    cursor,
+    "test_cases",
+    "execution_status TEXT DEFAULT 'NOT RUN'"
+)
+
+connection.commit()
+connection.close()
+
+print("Database migration completed successfully.")
