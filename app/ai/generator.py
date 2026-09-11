@@ -13,7 +13,11 @@ OLLAMA_MODEL = "llama3.2:3b"
 
 BASE_URL = "http://127.0.0.1:8000"
 
-OLLAMA_TIMEOUT = 15
+# Ollama is only an optional enhancement.
+# Keep this short so generation does not wait too long.
+OLLAMA_TIMEOUT = 5
+
+# Timeout for actual API test execution.
 REQUEST_TIMEOUT = 15
 
 
@@ -459,26 +463,44 @@ def get_success_status_code(
         if 200 <= code <= 299
     ]
 
+    # OpenAPI documented success code
+    # always has priority.
     if success_codes:
         return success_codes[0]
+
+    # For manually-created APIs,
+    # use conventional HTTP status codes.
+    method = str(
+        api_info.get(
+            "method",
+            "GET",
+        )
+    ).upper()
+
+    # Creating a resource normally returns 201.
+    if method == "POST":
+        return 201
+
+    # Successful DELETE commonly returns 204.
+    if method == "DELETE":
+        return 204
 
     return default
 
 
-def get_validation_status_code(
-    api_info,
-    default=422,
-):
-
-    codes = get_openapi_status_codes(
-        api_info
-    )
+def get_validation_status_code(api_info, default=422):
+    codes = get_openapi_status_codes(api_info)
 
     if 422 in codes:
         return 422
 
+    if 400 in codes:
+        return 400
+
     return default
 
+def get_missing_required_status_code(default=422):
+    return 422
 
 # ============================================================
 # BODY / SCHEMA HELPERS
@@ -545,7 +567,6 @@ def get_body_schema(
 
 
 # ============================================================
-# NEW:
 # HANDLE REQUEST BODY STORED AS OPENAPI DEFINITION
 # ============================================================
 
@@ -568,26 +589,8 @@ def get_manual_body_value(
     if not parsed_body:
         return None
 
-    # --------------------------------------------------------
-    # IMPORTANT:
-    #
-    # Sometimes imported OpenAPI information is stored inside
-    # the database request_body field like this:
-    #
-    # {
-    #   "required": true,
-    #   "content": {
-    #       "application/json": {
-    #           "schema": {...}
-    #       }
-    #   }
-    # }
-    #
-    # That is NOT actual request JSON.
-    #
-    # Detect it and return None so the OpenAPI schema is used.
-    # --------------------------------------------------------
-
+    # Imported OpenAPI requestBody wrapper
+    # is not actual request JSON.
     if (
         "content" in parsed_body
         and isinstance(
@@ -612,10 +615,7 @@ def get_manual_body_value(
 
         return None
 
-    # --------------------------------------------------------
-    # Otherwise it is a real manually-entered JSON body.
-    # --------------------------------------------------------
-
+    # Real manually-entered JSON.
     return parsed_body
 
 
@@ -623,10 +623,7 @@ def get_body_properties(
     api_info
 ):
 
-    # --------------------------------------------------------
     # OpenAPI schema first.
-    # --------------------------------------------------------
-
     schema = get_body_schema(
         api_info
     )
@@ -643,10 +640,7 @@ def get_body_properties(
 
         return properties
 
-    # --------------------------------------------------------
     # Manual JSON body.
-    # --------------------------------------------------------
-
     manual_body = (
         get_manual_body_value(
             api_info
@@ -671,6 +665,10 @@ def get_body_properties(
                         if isinstance(
                             value,
                             int,
+                        )
+                        and not isinstance(
+                            value,
+                            bool,
                         )
                         else (
                             "number"
@@ -717,9 +715,6 @@ def get_required_body_fields(
     ):
         return required
 
-    # For manually-created JSON,
-    # treat all supplied fields as available fields,
-    # but do not assume they are required.
     return []
 
 
@@ -886,10 +881,7 @@ def build_valid_body(
     api_info
 ):
 
-    # --------------------------------------------------------
-    # 1. OpenAPI schema.
-    # --------------------------------------------------------
-
+    # OpenAPI schema.
     properties = get_body_properties(
         api_info
     )
@@ -929,10 +921,7 @@ def build_valid_body(
 
         return body
 
-    # --------------------------------------------------------
-    # 2. Manually-created JSON body.
-    # --------------------------------------------------------
-
+    # Manually-created JSON body.
     manual_body = (
         get_manual_body_value(
             api_info
@@ -1404,11 +1393,6 @@ def create_fallback_test_cases(
         "PATCH",
     }:
 
-        manual_body = api_info.get(
-            "request_body",
-            ""
-        ) or ""
-
         schema_body = get_body_schema(
             api_info
         )
@@ -1498,22 +1482,22 @@ def create_fallback_test_cases(
 
         if missing_body is not None:
 
-            cases.append(
-                make_test(
-                    "Missing Required Field",
-                    method,
-                    endpoint,
-                    "Negative",
-                    "Verify that a request missing a required field is rejected.",
-                    {
-                        "body": missing_body,
-                        "query_parameters": {},
-                        "path_parameters": {},
-                    },
-                    validation_status,
-                    "The API should return a validation error.",
-                )
-            )
+           cases.append(
+             make_test(
+              "Missing Required Field",
+            method,
+            endpoint,
+            "Negative",
+            "Verify that a request missing a required field is rejected.",
+            {
+                "body": missing_body,
+                "query_parameters": {},
+                "path_parameters": {},
+            },
+            get_missing_required_status_code(),
+            "The API should return a validation error.",
+        )
+    )
 
         # ----------------------------------------------------
         # BOUNDARY TESTS
@@ -2022,9 +2006,8 @@ Return JSON:
 
     except Exception as exc:
 
-        print(
-            "Ollama enhancement skipped:",
-            str(exc),
+               print(
+            "Ollama AI enhancement unavailable; using generated test cases."
         )
 
     return test_cases
