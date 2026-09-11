@@ -8,11 +8,6 @@ from app.auth import get_current_user
 from app.database import get_db
 from app.ai.generator import generate_ai_test_cases
 
-from app.test_executor import (
-    generate_test_code,
-    execute_test_case
-)
-
 
 router = APIRouter(
     prefix="/projects",
@@ -100,7 +95,7 @@ def create_project(
 
 
 # ============================================================
-# GENERATE AND EXECUTE TEST CASES
+# GENERATE TEST CASES
 # ============================================================
 
 @router.post(
@@ -112,10 +107,6 @@ def generate_test_cases(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
-    # --------------------------------------------------------
-    # CHECK PROJECT ACCESS
-    # --------------------------------------------------------
-
     project = get_user_project(
         project_id,
         db,
@@ -123,7 +114,7 @@ def generate_test_cases(
     )
 
     # --------------------------------------------------------
-    # GET APIs BELONGING TO PROJECT
+    # GET PROJECT APIs
     # --------------------------------------------------------
 
     apis = (
@@ -141,7 +132,7 @@ def generate_test_cases(
         )
 
     # --------------------------------------------------------
-    # DELETE OLD TEST CASES
+    # DELETE PREVIOUS TEST CASES
     # --------------------------------------------------------
 
     api_ids = [
@@ -163,43 +154,17 @@ def generate_test_cases(
 
     generated_test_cases = []
 
-    # ========================================================
-    # PROCESS EACH API
-    # ========================================================
+    # --------------------------------------------------------
+    # GENERATE TEST CASES FOR EACH API
+    # --------------------------------------------------------
 
     for api in apis:
 
-        # ----------------------------------------------------
-        # READ OPENAPI DETAILS
-        # ----------------------------------------------------
-
-        openapi_details = {}
-
-        if api.openapi_details:
-
-            try:
-                openapi_details = json.loads(
-                    api.openapi_details
-                )
-
-            except (
-                json.JSONDecodeError,
-                TypeError
-            ):
-                openapi_details = {}
-
-        # ----------------------------------------------------
-        # GENERATE AI TEST CASES
-        # ----------------------------------------------------
-
         try:
-
-            ai_test_cases = generate_ai_test_cases(
-                method=api.method,
-                endpoint=api.endpoint,
-                request_body=api.request_body or "",
-                openapi_details=openapi_details
-            )
+            # IMPORTANT:
+            # The current generator.py expects the complete
+            # API object, not separate keyword arguments.
+            ai_test_cases = generate_ai_test_cases(api)
 
         except Exception as exc:
 
@@ -214,28 +179,25 @@ def generate_test_cases(
             ) from exc
 
         # ----------------------------------------------------
-        # SAVE AND EXECUTE EACH TEST CASE
+        # SAVE GENERATED TEST CASES
         # ----------------------------------------------------
 
         for test_case in ai_test_cases:
 
-            # ------------------------------------------------
-            # REQUEST DATA
-            # ------------------------------------------------
-
             request_data = test_case.get(
                 "request_data",
-                ""
+                {}
             )
 
-            # If AI returns a dictionary/list,
-            # convert it to JSON text for SQLite.
+            # Database column is Text, so convert dictionaries
+            # and lists into JSON strings.
             if isinstance(
                 request_data,
                 (dict, list)
             ):
                 request_data = json.dumps(
-                    request_data
+                    request_data,
+                    ensure_ascii=False
                 )
 
             elif request_data is None:
@@ -246,31 +208,22 @@ def generate_test_cases(
                     request_data
                 )
 
-            # ------------------------------------------------
-            # EXPECTED STATUS CODE
-            # ------------------------------------------------
-
-            expected_status_code = test_case.get(
-                "expected_status_code"
+            expected_status_code = (
+                test_case.get(
+                    "expected_status_code"
+                )
             )
 
             try:
-
                 if expected_status_code is not None:
                     expected_status_code = int(
                         expected_status_code
                     )
-
             except (
                 TypeError,
                 ValueError
             ):
-
                 expected_status_code = None
-
-            # ------------------------------------------------
-            # CREATE DATABASE TEST CASE
-            # ------------------------------------------------
 
             database_test_case = models.TestCase(
 
@@ -308,79 +261,31 @@ def generate_test_cases(
                     ""
                 ),
 
-                expected_status_code=expected_status_code,
+                expected_status_code=(
+                    expected_status_code
+                ),
 
-                execution_status="NOT RUN"
+                test_code=test_case.get(
+                    "test_code",
+                    ""
+                ),
+
+                actual_result=test_case.get(
+                    "actual_result",
+                    ""
+                ),
+
+                execution_status=test_case.get(
+                    "execution_status",
+                    "NOT RUN"
+                )
             )
-
-            # ------------------------------------------------
-            # GENERATE EXECUTABLE PYTHON CODE
-            # ------------------------------------------------
-
-            try:
-
-                database_test_case.test_code = (
-                    generate_test_code(
-                        database_test_case
-                    )
-                )
-
-            except Exception as exc:
-
-                database_test_case.test_code = (
-                    "# Test code generation failed\n"
-                    f"# Error: {str(exc)}"
-                )
-
-            # ------------------------------------------------
-            # SAVE TEST CASE TEMPORARILY
-            # ------------------------------------------------
 
             db.add(
                 database_test_case
             )
 
             db.flush()
-
-            # ------------------------------------------------
-            # EXECUTE TEST
-            # ------------------------------------------------
-
-            try:
-
-                execution_result = (
-                    execute_test_case(
-                        database_test_case
-                    )
-                )
-
-                database_test_case.actual_result = (
-                    execution_result.get(
-                        "actual_result",
-                        ""
-                    )
-                )
-
-                database_test_case.execution_status = (
-                    execution_result.get(
-                        "execution_status",
-                        "NOT RUN"
-                    )
-                )
-
-            except Exception as exc:
-
-                database_test_case.actual_result = (
-                    f"Execution failed: {str(exc)}"
-                )
-
-                database_test_case.execution_status = (
-                    "FAIL"
-                )
-
-            # ------------------------------------------------
-            # ADD COMPLETE RESULT TO RESPONSE
-            # ------------------------------------------------
 
             generated_test_cases.append(
                 {
@@ -406,13 +311,9 @@ def generate_test_cases(
                         database_test_case.expected_status_code
                     ),
 
-                    "test_code": (
-                        database_test_case.test_code
-                    ),
+                    "test_code": database_test_case.test_code,
 
-                    "actual_result": (
-                        database_test_case.actual_result
-                    ),
+                    "actual_result": database_test_case.actual_result,
 
                     "execution_status": (
                         database_test_case.execution_status
@@ -420,15 +321,11 @@ def generate_test_cases(
                 }
             )
 
-    # ========================================================
-    # COMMIT ALL TEST CASES
-    # ========================================================
+    # --------------------------------------------------------
+    # SAVE ALL GENERATED TEST CASES
+    # --------------------------------------------------------
 
     db.commit()
-
-    # ========================================================
-    # RETURN GENERATED TEST CASES
-    # ========================================================
 
     return {
         "project_id": project.id,
@@ -449,19 +346,11 @@ def get_test_cases(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
-    # --------------------------------------------------------
-    # CHECK PROJECT ACCESS
-    # --------------------------------------------------------
-
     project = get_user_project(
         project_id,
         db,
         current_user
     )
-
-    # --------------------------------------------------------
-    # GET PROJECT APIs
-    # --------------------------------------------------------
 
     apis = (
         db.query(models.API)
@@ -473,10 +362,6 @@ def get_test_cases(
 
     if not apis:
         return []
-
-    # --------------------------------------------------------
-    # GET TEST CASES
-    # --------------------------------------------------------
 
     api_ids = [
         api.id
