@@ -1,6 +1,8 @@
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional
+
 
 router = APIRouter(tags=["Test Users"])
 
@@ -23,7 +25,7 @@ def get_all_users():
     }
 
 
-@router.post("/users")
+@router.post("/users", status_code=201)
 def create_user(user: UserCreate):
 
     # Validate email
