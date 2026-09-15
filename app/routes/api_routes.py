@@ -1,3 +1,4 @@
+
 import json
 import yaml
 
@@ -108,7 +109,9 @@ def get_project_apis(
 
     apis = (
         db.query(models.API)
-        .filter(models.API.project_id == project.id)
+        .filter(
+            models.API.project_id == project.id
+        )
         .all()
     )
 
@@ -215,6 +218,7 @@ async def import_openapi(
     }
 
     apis_imported = []
+    skipped_duplicates = []
 
     # ========================================================
     # IMPORT EVERY ENDPOINT
@@ -227,12 +231,6 @@ async def import_openapi(
 
         # ----------------------------------------------------
         # GET PATH-LEVEL PARAMETERS
-        #
-        # Example:
-        # /users/{id}
-        # parameters:
-        #   - name: id
-        #     in: path
         # ----------------------------------------------------
 
         path_level_parameters = endpoint_data.get(
@@ -256,6 +254,31 @@ async def import_openapi(
                 method_data = {}
 
             method_upper = method.upper()
+
+            # =================================================
+            # CHECK FOR DUPLICATE API
+            # =================================================
+
+            existing_api = (
+                db.query(models.API)
+                .filter(
+                    models.API.project_id == project.id,
+                    models.API.method == method_upper,
+                    models.API.endpoint == endpoint
+                )
+                .first()
+            )
+
+            if existing_api:
+
+                skipped_duplicates.append(
+                    {
+                        "method": method_upper,
+                        "endpoint": endpoint
+                    }
+                )
+
+                continue
 
             # ------------------------------------------------
             # REQUEST BODY
@@ -291,7 +314,7 @@ async def import_openapi(
                 )
 
             # ------------------------------------------------
-            # COMBINE PATH-LEVEL + METHOD-LEVEL PARAMETERS
+            # COMBINE PATH + METHOD PARAMETERS
             # ------------------------------------------------
 
             method_level_parameters = method_data.get(
@@ -307,7 +330,7 @@ async def import_openapi(
 
             parameters = []
 
-            # Add path-level parameters first
+            # Add path-level parameters
             parameters.extend(
                 path_level_parameters
             )
@@ -317,7 +340,10 @@ async def import_openapi(
                 method_level_parameters
             )
 
-            # Remove duplicate parameters
+            # ------------------------------------------------
+            # REMOVE DUPLICATE PARAMETERS
+            # ------------------------------------------------
+
             unique_parameters = []
             seen_parameters = set()
 
@@ -420,7 +446,7 @@ async def import_openapi(
     # CHECK RESULT
     # --------------------------------------------------------
 
-    if not apis_imported:
+    if not apis_imported and not skipped_duplicates:
         raise HTTPException(
             status_code=400,
             detail=(
@@ -444,5 +470,7 @@ async def import_openapi(
         "project_id": project.id,
         "filename": filename,
         "apis_imported": apis_imported,
-        "total_apis": len(apis_imported)
+        "skipped_duplicates": skipped_duplicates,
+        "total_apis": len(apis_imported),
+        "total_skipped": len(skipped_duplicates)
     }

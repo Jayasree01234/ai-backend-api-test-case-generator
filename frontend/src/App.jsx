@@ -1,4 +1,3 @@
-
 import { useEffect, useState } from "react";
 import "./App.css";
 
@@ -171,6 +170,10 @@ function App() {
     }
   };
 
+  // =====================================================
+  // LOGOUT
+  // =====================================================
+
   const handleLogout = () => {
     localStorage.removeItem("access_token");
     localStorage.removeItem("current_project_id");
@@ -191,7 +194,13 @@ function App() {
     setSelectedFile(null);
     setUploadMessage("");
     setUploadError("");
+    setGenerateError("");
+    setProjectError("");
   };
+
+  // =====================================================
+  // CREATE PROJECT
+  // =====================================================
 
   const createProject = async (event) => {
     event.preventDefault();
@@ -259,6 +268,10 @@ function App() {
     setShowCreateProject(true);
   };
 
+  // =====================================================
+  // OPEN PROJECT
+  // =====================================================
+
   const openProject = async (project) => {
     setOpeningProject(true);
     setProjectError("");
@@ -300,6 +313,10 @@ function App() {
     }
   };
 
+  // =====================================================
+  // LOAD TEST CASES
+  // =====================================================
+
   const loadTestCases = async (selectedProjectId) => {
     try {
       const response = await fetch(
@@ -325,6 +342,10 @@ function App() {
     }
   };
 
+  // =====================================================
+  // BACK TO PROJECTS
+  // =====================================================
+
   const backToProjects = async () => {
     localStorage.removeItem("current_project_id");
     localStorage.removeItem("current_project_name");
@@ -346,6 +367,10 @@ function App() {
 
     await fetchProjects();
   };
+
+  // =====================================================
+  // OPENAPI FILE
+  // =====================================================
 
   const handleFileChange = (event) => {
     const file = event.target.files?.[0];
@@ -428,6 +453,10 @@ function App() {
     }
   };
 
+  // =====================================================
+  // GENERATE TEST CASES
+  // =====================================================
+
   const generateTestCases = async () => {
     if (!projectId) {
       setGenerateError("Please create or open a project first.");
@@ -469,30 +498,88 @@ function App() {
     }
   };
 
+  // =====================================================
+  // EXPORT HELPERS
+  // =====================================================
+
+  const downloadExport = async (type, filename) => {
+    try {
+      const authToken =
+        token || localStorage.getItem("access_token");
+
+      if (!authToken) {
+        throw new Error("You are not authenticated. Please login again.");
+      }
+
+      if (!projectId) {
+        throw new Error("Please open a project first.");
+      }
+
+      const response = await fetch(
+        `${API_BASE_URL}/projects/${projectId}/export/${type}`,
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${authToken}`,
+          },
+        }
+      );
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+
+        throw new Error(
+          data.detail || `Failed to export ${type}`
+        );
+      }
+
+      const blob = await response.blob();
+
+      const url = window.URL.createObjectURL(blob);
+
+      const link = document.createElement("a");
+
+      link.href = url;
+      link.download = filename;
+
+      document.body.appendChild(link);
+
+      link.click();
+
+      link.remove();
+
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error("Export error:", error);
+
+      alert(error.message);
+    }
+  };
+
   const exportExcel = () => {
-    window.open(
-      `${API_BASE_URL}/projects/${projectId}/export/excel?token=${token}`,
-      "_blank"
+    downloadExport(
+      "excel",
+      `project_${projectId}_test_cases.xlsx`
     );
   };
 
   const exportPDF = () => {
-    window.open(
-      `${API_BASE_URL}/projects/${projectId}/export/pdf?token=${token}`,
-      "_blank"
+    downloadExport(
+      "pdf",
+      `project_${projectId}_test_cases.pdf`
     );
   };
 
   const exportPostman = () => {
-    window.open(
-      `${API_BASE_URL}/projects/${projectId}/export/postman?token=${token}`,
-      "_blank"
+    downloadExport(
+      "postman",
+      `project_${projectId}_postman.json`
     );
   };
 
-  /* =====================================================
-     LOGIN PAGE
-  ===================================================== */
+  // =====================================================
+  // LOGIN PAGE
+  // =====================================================
 
   if (!loggedIn) {
     return (
@@ -565,9 +652,9 @@ function App() {
     );
   }
 
-  /* =====================================================
-     PROJECT LIST
-  ===================================================== */
+  // =====================================================
+  // PROJECT LIST
+  // =====================================================
 
   if (!projectId && !showCreateProject) {
     return (
@@ -588,9 +675,32 @@ function App() {
                 </p>
               </div>
 
-              <div className="header-status">
-                <div className="pulse"></div>
-                Connected
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "12px",
+                }}
+              >
+                <div className="header-status">
+                  <div className="pulse"></div>
+                  Connected
+                </div>
+
+                <button
+                  onClick={handleLogout}
+                  style={{
+                    padding: "10px 18px",
+                    border: "none",
+                    borderRadius: "8px",
+                    background: "#dc2626",
+                    color: "white",
+                    cursor: "pointer",
+                    fontWeight: "600",
+                  }}
+                >
+                  Logout
+                </button>
               </div>
             </div>
 
@@ -639,7 +749,10 @@ function App() {
               ) : (
                 <div className="test-grid">
                   {projects.map((project) => (
-                    <div className="test-card" key={project.id}>
+                    <div
+                      className="test-card"
+                      key={project.id}
+                    >
                       <div className="test-card-top">
                         <span className="type-badge">
                           PROJECT
@@ -677,9 +790,9 @@ function App() {
     );
   }
 
-  /* =====================================================
-     CREATE PROJECT
-  ===================================================== */
+  // =====================================================
+  // CREATE PROJECT
+  // =====================================================
 
   if (showCreateProject && !projectId) {
     return (
@@ -699,12 +812,35 @@ function App() {
                 </p>
               </div>
 
-              <button
-                className="gradient-button"
-                onClick={backToProjects}
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "12px",
+                }}
               >
-                ← My Projects
-              </button>
+                <button
+                  className="gradient-button"
+                  onClick={backToProjects}
+                >
+                  ← My Projects
+                </button>
+
+                <button
+                  onClick={handleLogout}
+                  style={{
+                    padding: "10px 18px",
+                    border: "none",
+                    borderRadius: "8px",
+                    background: "#dc2626",
+                    color: "white",
+                    cursor: "pointer",
+                    fontWeight: "600",
+                  }}
+                >
+                  Logout
+                </button>
+              </div>
             </div>
 
             <div className="content-card">
@@ -778,9 +914,9 @@ function App() {
     );
   }
 
-  /* =====================================================
-     PROJECT WORKSPACE
-  ===================================================== */
+  // =====================================================
+  // PROJECT WORKSPACE
+  // =====================================================
 
   return (
     <div className="app">
@@ -820,7 +956,9 @@ function App() {
         <main className="main-content">
           <div className="top-header">
             <div>
-              <div className="eyebrow">API TESTING WORKSPACE</div>
+              <div className="eyebrow">
+                API TESTING WORKSPACE
+              </div>
 
               <h1>
                 {projectName || "API Testing"}{" "}
@@ -833,9 +971,32 @@ function App() {
               </p>
             </div>
 
-            <div className="header-status">
-              <div className="pulse"></div>
-              Project #{projectId}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "12px",
+              }}
+            >
+              <div className="header-status">
+                <div className="pulse"></div>
+                Project #{projectId}
+              </div>
+
+              <button
+                onClick={handleLogout}
+                style={{
+                  padding: "10px 18px",
+                  border: "none",
+                  borderRadius: "8px",
+                  background: "#dc2626",
+                  color: "white",
+                  cursor: "pointer",
+                  fontWeight: "600",
+                }}
+              >
+                Logout
+              </button>
             </div>
           </div>
 
