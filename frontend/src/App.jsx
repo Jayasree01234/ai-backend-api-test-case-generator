@@ -7,32 +7,46 @@ function App() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
-  const [token, setToken] = useState(
-    () => localStorage.getItem("access_token") || ""
-  );
+  // =====================================================
+  // AUTHENTICATION
+  // =====================================================
 
-  const [loggedIn, setLoggedIn] = useState(
-    () => !!localStorage.getItem("access_token")
-  );
+  /// Restore login session after page refresh.
+  const [token, setToken] = useState(
+  () => localStorage.getItem("access_token") || ""
+);
+
+const [loggedIn, setLoggedIn] = useState(
+  () => !!localStorage.getItem("access_token")
+);
 
   const [loginError, setLoginError] = useState("");
   const [loggingIn, setLoggingIn] = useState(false);
 
+  // Registration
+  const [showRegister, setShowRegister] = useState(false);
+  const [registerName, setRegisterName] = useState("");
+  const [registerEmail, setRegisterEmail] = useState("");
+  const [registerPassword, setRegisterPassword] = useState("");
+  const [registerError, setRegisterError] = useState("");
+  const [registerSuccess, setRegisterSuccess] = useState("");
+  const [registering, setRegistering] = useState(false);
+
+  // =====================================================
+  // PROJECT STATE
+  // =====================================================
+
   const [projects, setProjects] = useState([]);
   const [projectsLoading, setProjectsLoading] = useState(false);
 
-  const [projectId, setProjectId] = useState(() => {
-    const saved = localStorage.getItem("current_project_id");
-    return saved ? Number(saved) : null;
-  });
+ const [projectId, setProjectId] = useState(
+  () => localStorage.getItem("current_project_id") || null
+);
 
-  const [projectName, setProjectName] = useState(
-    () => localStorage.getItem("current_project_name") || ""
-  );
-
-  const [projectDescription, setProjectDescription] = useState(
-    () => localStorage.getItem("current_project_description") || ""
-  );
+const [projectName, setProjectName] = useState(
+  () => localStorage.getItem("current_project_name") || ""
+);
+  const [projectDescription, setProjectDescription] = useState("");
 
   const [showCreateProject, setShowCreateProject] = useState(false);
   const [openingProject, setOpeningProject] = useState(false);
@@ -40,12 +54,20 @@ function App() {
   const [projectError, setProjectError] = useState("");
   const [creatingProject, setCreatingProject] = useState(false);
 
+  // =====================================================
+  // OPENAPI STATE
+  // =====================================================
+
   const [selectedFile, setSelectedFile] = useState(null);
   const [importedApis, setImportedApis] = useState([]);
 
   const [uploading, setUploading] = useState(false);
   const [uploadMessage, setUploadMessage] = useState("");
   const [uploadError, setUploadError] = useState("");
+
+  // =====================================================
+  // TEST CASE STATE
+  // =====================================================
 
   const [testCases, setTestCases] = useState([]);
   const [generating, setGenerating] = useState(false);
@@ -56,81 +78,56 @@ function App() {
     "Content-Type": "application/json",
   });
 
+  // =====================================================
+  // LOAD PROJECTS AFTER LOGIN
+  // =====================================================
+
   useEffect(() => {
-    if (!token) return;
+    if (!loggedIn || !token) {
+      return;
+    }
 
-    const restoreApplication = async () => {
-      try {
-        await fetchProjects();
-
-        const savedProjectId = localStorage.getItem("current_project_id");
-
-        if (!savedProjectId) return;
-
-        const savedId = Number(savedProjectId);
-
-        const apiResponse = await fetch(
-          `${API_BASE_URL}/projects/${savedId}/apis`,
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          }
-        );
-
-        if (!apiResponse.ok) {
-          localStorage.removeItem("current_project_id");
-          localStorage.removeItem("current_project_name");
-          localStorage.removeItem("current_project_description");
-
-          setProjectId(null);
-          setProjectName("");
-          setProjectDescription("");
-          setImportedApis([]);
-          setTestCases([]);
-
-          return;
-        }
-
-        const apiData = await apiResponse.json();
-
-        setProjectId(savedId);
-        setImportedApis(Array.isArray(apiData) ? apiData : []);
-
-        await loadTestCases(savedId);
-      } catch (error) {
-        console.error("Error restoring application:", error);
-      }
-    };
-
-    restoreApplication();
-  }, [token]);
+    fetchProjects();
+  }, [loggedIn, token]);
 
   const fetchProjects = async () => {
-    if (!token) return;
+    if (!token) {
+      return;
+    }
 
     setProjectsLoading(true);
 
     try {
       const response = await fetch(`${API_BASE_URL}/projects/`, {
+        method: "GET",
         headers: {
           Authorization: `Bearer ${token}`,
         },
       });
 
-      if (!response.ok) {
-        throw new Error("Failed to fetch projects");
+      const data = await response.json();
+
+      if (response.status === 401) {
+        handleLogout();
+        return;
       }
 
-      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.detail || "Failed to fetch projects");
+      }
 
       setProjects(Array.isArray(data) ? data : []);
     } catch (error) {
       console.error("Fetch projects error:", error);
+      setProjectError(error.message);
     } finally {
       setProjectsLoading(false);
     }
   };
+
+  // =====================================================
+  // LOGIN
+  // =====================================================
 
   const handleLogin = async (event) => {
     event.preventDefault();
@@ -156,6 +153,13 @@ function App() {
         throw new Error(data.detail || "Login failed");
       }
 
+      if (!data.access_token) {
+        throw new Error(
+          "Login succeeded but no access token was returned."
+        );
+      }
+
+      // Store token after successful login.
       localStorage.setItem("access_token", data.access_token);
 
       setToken(data.access_token);
@@ -163,10 +167,74 @@ function App() {
 
       setEmail("");
       setPassword("");
+
+      setProjectId(null);
+      setProjectName("");
+      setProjectDescription("");
+
+      setImportedApis([]);
+      setTestCases([]);
     } catch (error) {
       setLoginError(error.message);
     } finally {
       setLoggingIn(false);
+    }
+  };
+
+  // =====================================================
+  // REGISTER
+  // =====================================================
+
+  const handleRegister = async (event) => {
+    event.preventDefault();
+
+    setRegisterError("");
+    setRegisterSuccess("");
+    setRegistering(true);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/auth/register`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name: registerName,
+          email: registerEmail,
+          password: registerPassword,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.detail ||
+            data.message ||
+            "Registration failed"
+        );
+      }
+
+      // Registration successful.
+      setRegisterSuccess(
+        "Registration successful! Please login with your new account."
+      );
+
+      setRegisterName("");
+      setRegisterEmail("");
+      setRegisterPassword("");
+
+      // Switch back to login after successful registration.
+      setShowRegister(false);
+
+      // Clear login fields so user can enter credentials.
+      setEmail("");
+      setPassword("");
+      setLoginError("");
+    } catch (error) {
+      setRegisterError(error.message);
+    } finally {
+      setRegistering(false);
     }
   };
 
@@ -183,7 +251,11 @@ function App() {
     setToken("");
     setLoggedIn(false);
 
+    setEmail("");
+    setPassword("");
+
     setProjects([]);
+
     setProjectId(null);
     setProjectName("");
     setProjectDescription("");
@@ -192,10 +264,22 @@ function App() {
     setTestCases([]);
 
     setSelectedFile(null);
+
     setUploadMessage("");
     setUploadError("");
+
     setGenerateError("");
     setProjectError("");
+
+    setShowCreateProject(false);
+
+    // Reset registration state.
+    setShowRegister(false);
+    setRegisterName("");
+    setRegisterEmail("");
+    setRegisterPassword("");
+    setRegisterError("");
+    setRegisterSuccess("");
   };
 
   // =====================================================
@@ -220,12 +304,22 @@ function App() {
 
       const data = await response.json();
 
+      if (response.status === 401) {
+        handleLogout();
+        return;
+      }
+
       if (!response.ok) {
-        throw new Error(data.detail || "Failed to create project");
+        throw new Error(
+          data.detail || "Failed to create project"
+        );
       }
 
       localStorage.setItem("current_project_id", data.id);
-      localStorage.setItem("current_project_name", data.name || "");
+      localStorage.setItem(
+        "current_project_name",
+        data.name || ""
+      );
       localStorage.setItem(
         "current_project_description",
         data.description || ""
@@ -264,6 +358,7 @@ function App() {
     setUploadMessage("");
     setUploadError("");
     setGenerateError("");
+    setProjectError("");
 
     setShowCreateProject(true);
   };
@@ -278,7 +373,10 @@ function App() {
 
     try {
       localStorage.setItem("current_project_id", project.id);
-      localStorage.setItem("current_project_name", project.name || "");
+      localStorage.setItem(
+        "current_project_name",
+        project.name || ""
+      );
       localStorage.setItem(
         "current_project_description",
         project.description || ""
@@ -291,17 +389,25 @@ function App() {
       const response = await fetch(
         `${API_BASE_URL}/projects/${project.id}/apis`,
         {
+          method: "GET",
           headers: {
             Authorization: `Bearer ${token}`,
           },
         }
       );
 
-      if (!response.ok) {
-        throw new Error("Failed to load project APIs");
+      const data = await response.json();
+
+      if (response.status === 401) {
+        handleLogout();
+        return;
       }
 
-      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(
+          data.detail || "Failed to load project APIs"
+        );
+      }
 
       setImportedApis(Array.isArray(data) ? data : []);
 
@@ -318,15 +424,25 @@ function App() {
   // =====================================================
 
   const loadTestCases = async (selectedProjectId) => {
+    if (!token) {
+      return;
+    }
+
     try {
       const response = await fetch(
         `${API_BASE_URL}/projects/${selectedProjectId}/test-cases`,
         {
+          method: "GET",
           headers: {
             Authorization: `Bearer ${token}`,
           },
         }
       );
+
+      if (response.status === 401) {
+        handleLogout();
+        return;
+      }
 
       if (!response.ok) {
         setTestCases([]);
@@ -362,6 +478,7 @@ function App() {
     setUploadMessage("");
     setUploadError("");
     setGenerateError("");
+    setProjectError("");
 
     setShowCreateProject(false);
 
@@ -386,17 +503,23 @@ function App() {
 
   const uploadOpenAPI = async () => {
     if (!projectId) {
-      setUploadError("Please create or open a project first.");
+      setUploadError(
+        "Please create or open a project first."
+      );
       return;
     }
 
     if (!selectedFile) {
-      setUploadError("Please select an OpenAPI JSON or YAML file.");
+      setUploadError(
+        "Please select an OpenAPI JSON or YAML file."
+      );
       return;
     }
 
     setUploading(true);
-    setUploadMessage(`Uploading ${selectedFile.name}...`);
+    setUploadMessage(
+      `Uploading ${selectedFile.name}...`
+    );
     setUploadError("");
 
     try {
@@ -417,13 +540,21 @@ function App() {
 
       const data = await response.json();
 
+      if (response.status === 401) {
+        handleLogout();
+        return;
+      }
+
       if (!response.ok) {
-        throw new Error(data.detail || "File upload failed");
+        throw new Error(
+          data.detail || "File upload failed"
+        );
       }
 
       const apiResponse = await fetch(
         `${API_BASE_URL}/projects/${projectId}/apis`,
         {
+          method: "GET",
           headers: {
             Authorization: `Bearer ${token}`,
           },
@@ -436,9 +567,13 @@ function App() {
         apiList = await apiResponse.json();
       }
 
-      setImportedApis(Array.isArray(apiList) ? apiList : []);
+      setImportedApis(
+        Array.isArray(apiList) ? apiList : []
+      );
 
-      const count = Array.isArray(apiList) ? apiList.length : 0;
+      const count = Array.isArray(apiList)
+        ? apiList.length
+        : 0;
 
       setUploadMessage(
         `File uploaded successfully! ${count} API(s) imported.`
@@ -459,7 +594,16 @@ function App() {
 
   const generateTestCases = async () => {
     if (!projectId) {
-      setGenerateError("Please create or open a project first.");
+      setGenerateError(
+        "Please create or open a project first."
+      );
+      return;
+    }
+
+    if (importedApis.length === 0) {
+      setGenerateError(
+        "Please import at least one API before generating test cases."
+      );
       return;
     }
 
@@ -479,14 +623,31 @@ function App() {
 
       const data = await response.json();
 
-      if (!response.ok) {
-        throw new Error(data.detail || "Failed to generate test cases");
+      if (response.status === 401) {
+        handleLogout();
+        return;
       }
 
-      setTestCases(data.test_cases || []);
+      if (!response.ok) {
+        throw new Error(
+          data.detail || "Failed to generate test cases"
+        );
+      }
 
-      localStorage.setItem("current_project_id", projectId);
-      localStorage.setItem("current_project_name", projectName);
+      setTestCases(
+        Array.isArray(data.test_cases)
+          ? data.test_cases
+          : []
+      );
+
+      localStorage.setItem(
+        "current_project_id",
+        projectId
+      );
+      localStorage.setItem(
+        "current_project_name",
+        projectName
+      );
       localStorage.setItem(
         "current_project_description",
         projectDescription
@@ -504,15 +665,16 @@ function App() {
 
   const downloadExport = async (type, filename) => {
     try {
-      const authToken =
-        token || localStorage.getItem("access_token");
-
-      if (!authToken) {
-        throw new Error("You are not authenticated. Please login again.");
+      if (!token) {
+        throw new Error(
+          "You are not authenticated. Please login again."
+        );
       }
 
       if (!projectId) {
-        throw new Error("Please open a project first.");
+        throw new Error(
+          "Please open a project first."
+        );
       }
 
       const response = await fetch(
@@ -520,16 +682,24 @@ function App() {
         {
           method: "GET",
           headers: {
-            Authorization: `Bearer ${authToken}`,
+            Authorization: `Bearer ${token}`,
           },
         }
       );
 
+      if (response.status === 401) {
+        handleLogout();
+        return;
+      }
+
       if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
+        const data = await response
+          .json()
+          .catch(() => ({}));
 
         throw new Error(
-          data.detail || `Failed to export ${type}`
+          data.detail ||
+            `Failed to export ${type}`
         );
       }
 
@@ -551,7 +721,6 @@ function App() {
       window.URL.revokeObjectURL(url);
     } catch (error) {
       console.error("Export error:", error);
-
       alert(error.message);
     }
   };
@@ -578,10 +747,148 @@ function App() {
   };
 
   // =====================================================
-  // LOGIN PAGE
+  // LOGIN / REGISTER PAGE
   // =====================================================
 
-  if (!loggedIn) {
+  if (!loggedIn || !token) {
+    // ===================================================
+    // REGISTER PAGE
+    // ===================================================
+
+    if (showRegister) {
+      return (
+        <div className="login-page">
+          <div className="login-background"></div>
+
+          <div className="login-card">
+            <div className="logo">
+              <div className="logo-icon">AI</div>
+
+              <span>API Test Generator</span>
+            </div>
+
+            <div className="login-heading">
+              <h1>Create account</h1>
+
+              <p>
+                Register to start generating intelligent
+                API test cases with AI.
+              </p>
+            </div>
+
+            <form onSubmit={handleRegister}>
+              <div className="form-group">
+                <label htmlFor="registerName">
+                  Full Name
+                </label>
+
+                <input
+                  id="registerName"
+                  type="text"
+                  value={registerName}
+                  onChange={(event) =>
+                    setRegisterName(event.target.value)
+                  }
+                  placeholder="Enter your name"
+                  required
+                />
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="registerEmail">
+                  Email address
+                </label>
+
+                <input
+                  id="registerEmail"
+                  type="email"
+                  value={registerEmail}
+                  onChange={(event) =>
+                    setRegisterEmail(event.target.value)
+                  }
+                  placeholder="Enter your email"
+                  required
+                />
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="registerPassword">
+                  Password
+                </label>
+
+                <input
+                  id="registerPassword"
+                  type="password"
+                  value={registerPassword}
+                  onChange={(event) =>
+                    setRegisterPassword(event.target.value)
+                  }
+                  placeholder="Create a password"
+                  required
+                  minLength={6}
+                />
+              </div>
+
+              {registerError && (
+                <div className="error-message">
+                  {registerError}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                className="primary-button"
+                disabled={registering}
+              >
+                {registering
+                  ? "Creating account..."
+                  : "Create Account →"}
+              </button>
+            </form>
+
+            <div
+              style={{
+                textAlign: "center",
+                marginTop: "20px",
+              }}
+            >
+              <span>
+                Already have an account?{" "}
+              </span>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setShowRegister(false);
+                  setRegisterError("");
+                  setRegisterSuccess("");
+                }}
+                style={{
+                  background: "none",
+                  border: "none",
+                  padding: 0,
+                  color: "#7c3aed",
+                  fontWeight: "600",
+                  cursor: "pointer",
+                  fontSize: "inherit",
+                }}
+              >
+                Login
+              </button>
+            </div>
+
+            <div className="login-footer">
+              AI-powered REST API testing platform
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ===================================================
+    // LOGIN PAGE
+    // ===================================================
+
     return (
       <div className="login-page">
         <div className="login-background"></div>
@@ -602,28 +909,51 @@ function App() {
             </p>
           </div>
 
+          {registerSuccess && (
+            <div
+              style={{
+                marginBottom: "16px",
+                padding: "12px 14px",
+                borderRadius: "8px",
+                background: "#dcfce7",
+                color: "#166534",
+                fontSize: "14px",
+              }}
+            >
+              ✓ {registerSuccess}
+            </div>
+          )}
+
           <form onSubmit={handleLogin}>
             <div className="form-group">
-              <label htmlFor="email">Email address</label>
+              <label htmlFor="email">
+                Email address
+              </label>
 
               <input
                 id="email"
                 type="email"
                 value={email}
-                onChange={(event) => setEmail(event.target.value)}
+                onChange={(event) =>
+                  setEmail(event.target.value)
+                }
                 placeholder="Enter your email"
                 required
               />
             </div>
 
             <div className="form-group">
-              <label htmlFor="password">Password</label>
+              <label htmlFor="password">
+                Password
+              </label>
 
               <input
                 id="password"
                 type="password"
                 value={password}
-                onChange={(event) => setPassword(event.target.value)}
+                onChange={(event) =>
+                  setPassword(event.target.value)
+                }
                 placeholder="Enter your password"
                 required
               />
@@ -640,9 +970,43 @@ function App() {
               className="primary-button"
               disabled={loggingIn}
             >
-              {loggingIn ? "Signing in..." : "Login →"}
+              {loggingIn
+                ? "Signing in..."
+                : "Login →"}
             </button>
           </form>
+
+          <div
+            style={{
+              textAlign: "center",
+              marginTop: "20px",
+            }}
+          >
+            <span>
+              Don't have an account?{" "}
+            </span>
+
+            <button
+              type="button"
+              onClick={() => {
+                setShowRegister(true);
+                setLoginError("");
+                setRegisterError("");
+                setRegisterSuccess("");
+              }}
+              style={{
+                background: "none",
+                border: "none",
+                padding: 0,
+                color: "#7c3aed",
+                fontWeight: "600",
+                cursor: "pointer",
+                fontSize: "inherit",
+              }}
+            >
+              Register
+            </button>
+          </div>
 
           <div className="login-footer">
             AI-powered REST API testing platform
@@ -663,15 +1027,17 @@ function App() {
           <main className="main-content">
             <div className="top-header">
               <div>
-                <div className="eyebrow">WORKSPACE</div>
+                <div className="eyebrow">
+                  WORKSPACE
+                </div>
 
                 <h1>
                   My <span>Projects</span>
                 </h1>
 
                 <p className="header-description">
-                  Select an existing project or create a new
-                  project to begin API testing.
+                  Select an existing project or create a
+                  new project to begin API testing.
                 </p>
               </div>
 
@@ -726,7 +1092,9 @@ function App() {
               ) : projects.length === 0 ? (
                 <div className="content-card">
                   <div className="section-heading">
-                    <div className="section-icon">📁</div>
+                    <div className="section-icon">
+                      📁
+                    </div>
 
                     <div>
                       <h2>No projects yet</h2>
@@ -772,7 +1140,9 @@ function App() {
 
                       <button
                         className="gradient-button"
-                        onClick={() => openProject(project)}
+                        onClick={() =>
+                          openProject(project)
+                        }
                         disabled={openingProject}
                       >
                         {openingProject
@@ -801,14 +1171,17 @@ function App() {
           <main className="main-content">
             <div className="top-header">
               <div>
-                <div className="eyebrow">NEW PROJECT</div>
+                <div className="eyebrow">
+                  NEW PROJECT
+                </div>
 
                 <h1>
                   Create <span>Project</span>
                 </h1>
 
                 <p className="header-description">
-                  Set up a workspace for your REST API testing.
+                  Set up a workspace for your REST API
+                  testing.
                 </p>
               </div>
 
@@ -845,13 +1218,16 @@ function App() {
 
             <div className="content-card">
               <div className="section-heading">
-                <div className="section-icon">🚀</div>
+                <div className="section-icon">
+                  🚀
+                </div>
 
                 <div>
                   <h2>Project Details</h2>
 
                   <p>
-                    Enter the basic information for your project.
+                    Enter the basic information for your
+                    project.
                   </p>
                 </div>
               </div>
@@ -885,7 +1261,9 @@ function App() {
                     id="projectDescription"
                     value={projectDescription}
                     onChange={(event) =>
-                      setProjectDescription(event.target.value)
+                      setProjectDescription(
+                        event.target.value
+                      )
                     }
                     placeholder="Describe your API testing project"
                   />
@@ -923,7 +1301,9 @@ function App() {
       <div className="dashboard">
         <aside className="sidebar">
           <div className="brand">
-            <div className="brand-icon">AI</div>
+            <div className="brand-icon">
+              AI
+            </div>
 
             <div>
               <h2>API Generator</h2>
@@ -1002,7 +1382,9 @@ function App() {
 
           <div className="stats-grid">
             <div className="stat-card">
-              <div className="stat-icon purple">📁</div>
+              <div className="stat-icon purple">
+                📁
+              </div>
 
               <div>
                 <p>PROJECT ID</p>
@@ -1011,7 +1393,9 @@ function App() {
             </div>
 
             <div className="stat-card">
-              <div className="stat-icon blue">🔌</div>
+              <div className="stat-icon blue">
+                🔌
+              </div>
 
               <div>
                 <p>API ENDPOINTS</p>
@@ -1020,7 +1404,9 @@ function App() {
             </div>
 
             <div className="stat-card">
-              <div className="stat-icon pink">🧪</div>
+              <div className="stat-icon pink">
+                🧪
+              </div>
 
               <div>
                 <p>TEST CASES</p>
@@ -1037,14 +1423,20 @@ function App() {
             <div className="workflow">
               <div
                 className={`workflow-step ${
-                  importedApis.length > 0 ? "completed" : ""
+                  importedApis.length > 0
+                    ? "completed"
+                    : ""
                 }`}
               >
-                <div className="step-number">1</div>
+                <div className="step-number">
+                  1
+                </div>
 
                 <div>
                   <h4>Import API</h4>
-                  <p>Upload OpenAPI specification</p>
+                  <p>
+                    Upload OpenAPI specification
+                  </p>
                 </div>
               </div>
 
@@ -1052,14 +1444,20 @@ function App() {
 
               <div
                 className={`workflow-step ${
-                  testCases.length > 0 ? "completed" : ""
+                  testCases.length > 0
+                    ? "completed"
+                    : ""
                 }`}
               >
-                <div className="step-number">2</div>
+                <div className="step-number">
+                  2
+                </div>
 
                 <div>
                   <h4>Generate Tests</h4>
-                  <p>AI creates test scenarios</p>
+                  <p>
+                    AI creates test scenarios
+                  </p>
                 </div>
               </div>
 
@@ -1067,14 +1465,20 @@ function App() {
 
               <div
                 className={`workflow-step ${
-                  testCases.length > 0 ? "completed" : ""
+                  testCases.length > 0
+                    ? "completed"
+                    : ""
                 }`}
               >
-                <div className="step-number">3</div>
+                <div className="step-number">
+                  3
+                </div>
 
                 <div>
                   <h4>Review Results</h4>
-                  <p>Inspect generated test cases</p>
+                  <p>
+                    Inspect generated test cases
+                  </p>
                 </div>
               </div>
             </div>
@@ -1082,14 +1486,18 @@ function App() {
 
           <section className="content-card">
             <div className="section-heading">
-              <div className="section-icon">📤</div>
+              <div className="section-icon">
+                📤
+              </div>
 
               <div>
-                <h2>Upload OpenAPI / Swagger</h2>
+                <h2>
+                  Upload OpenAPI / Swagger
+                </h2>
 
                 <p>
-                  Upload a JSON or YAML specification to import
-                  your REST API endpoints.
+                  Upload a JSON or YAML specification
+                  to import your REST API endpoints.
                 </p>
               </div>
             </div>
@@ -1102,7 +1510,9 @@ function App() {
               />
 
               <div className="upload-visual">
-                <div className="upload-icon">↑</div>
+                <div className="upload-icon">
+                  ↑
+                </div>
 
                 <h3>
                   {selectedFile
@@ -1111,7 +1521,8 @@ function App() {
                 </h3>
 
                 <p>
-                  Supports .json, .yaml and .yml files
+                  Supports .json, .yaml and .yml
+                  files
                 </p>
               </div>
             </div>
@@ -1130,7 +1541,8 @@ function App() {
 
             {uploading && (
               <div className="upload-message">
-                ⏳ Uploading and processing your OpenAPI file...
+                ⏳ Uploading and processing your
+                OpenAPI file...
               </div>
             )}
 
@@ -1150,11 +1562,13 @@ function App() {
           <section className="content-card">
             <div className="api-card-header">
               <div>
-                <h2>Imported API Endpoints</h2>
+                <h2>
+                  Imported API Endpoints
+                </h2>
 
                 <p>
-                  Endpoints imported from your OpenAPI
-                  specification.
+                  Endpoints imported from your
+                  OpenAPI specification.
                 </p>
               </div>
 
@@ -1162,7 +1576,8 @@ function App() {
                 className="generate-button"
                 onClick={generateTestCases}
                 disabled={
-                  generating || importedApis.length === 0
+                  generating ||
+                  importedApis.length === 0
                 }
               >
                 {generating
@@ -1176,7 +1591,10 @@ function App() {
             ) : (
               <div className="api-list">
                 {importedApis.map((api) => (
-                  <div className="api-row" key={api.id}>
+                  <div
+                    className="api-row"
+                    key={api.id}
+                  >
                     <span
                       className={`method ${String(
                         api.method
@@ -1203,16 +1621,20 @@ function App() {
               <div className="ai-loader">
                 <div className="loader-ring"></div>
 
-                <div className="loader-center">AI</div>
+                <div className="loader-center">
+                  AI
+                </div>
               </div>
 
               <div>
-                <h2>AI is generating test cases</h2>
+                <h2>
+                  AI is generating test cases
+                </h2>
 
                 <p>
-                  Analyzing your API endpoints and creating
-                  functional, negative, boundary and security
-                  scenarios...
+                  Analyzing your API endpoints and
+                  creating functional, negative,
+                  boundary and security scenarios...
                 </p>
               </div>
             </section>
@@ -1227,10 +1649,13 @@ function App() {
           <section className="content-card">
             <div className="tests-header">
               <div>
-                <h2>Generated Test Cases</h2>
+                <h2>
+                  Generated Test Cases
+                </h2>
 
                 <p>
-                  AI-generated scenarios for your API endpoints.
+                  AI-generated scenarios for your
+                  API endpoints.
                 </p>
               </div>
 
@@ -1240,124 +1665,150 @@ function App() {
             </div>
 
             {testCases.length === 0 ? (
-              <p>No generated test cases yet.</p>
+              <p>
+                No generated test cases yet.
+              </p>
             ) : (
               <div className="test-grid">
-                {testCases.map((testCase, index) => {
-                  const status =
-                    testCase.execution_status || "NOT RUN";
+                {testCases.map(
+                  (testCase, index) => {
+                    const status =
+                      testCase.execution_status ||
+                      "NOT RUN";
 
-                  const statusUpper =
-                    String(status).toUpperCase();
+                    const statusUpper =
+                      String(status).toUpperCase();
 
-                  const type =
-                    String(testCase.test_type || "")
+                    const type = String(
+                      testCase.test_type || ""
+                    )
                       .toLowerCase()
                       .replace(/\s+/g, "-");
 
-                  return (
-                    <div
-                      className="test-card"
-                      key={testCase.id || index}
-                    >
-                      <div className="test-card-top">
-                        <span
-                          className={`type-badge ${type}`}
-                        >
-                          {testCase.test_type || "TEST"}
-                        </span>
+                    return (
+                      <div
+                        className="test-card"
+                        key={
+                          testCase.id || index
+                        }
+                      >
+                        <div className="test-card-top">
+                          <span
+                            className={`type-badge ${type}`}
+                          >
+                            {testCase.test_type ||
+                              "TEST"}
+                          </span>
 
-                        <span className="test-number">
-                          #{index + 1}
-                        </span>
-                      </div>
+                          <span className="test-number">
+                            #{index + 1}
+                          </span>
+                        </div>
 
-                      <h3>
-                        {testCase.title ||
-                          "Untitled Test Case"}
-                      </h3>
+                        <h3>
+                          {testCase.title ||
+                            "Untitled Test Case"}
+                        </h3>
 
-                      <div className="test-meta">
-                        <span
-                          className={`method ${String(
-                            testCase.method
-                          ).toLowerCase()}`}
-                        >
-                          {testCase.method}
-                        </span>
+                        <div className="test-meta">
+                          <span
+                            className={`method ${String(
+                              testCase.method
+                            ).toLowerCase()}`}
+                          >
+                            {testCase.method}
+                          </span>
 
-                        <span>
-                          {testCase.endpoint}
-                        </span>
-                      </div>
+                          <span>
+                            {testCase.endpoint}
+                          </span>
+                        </div>
 
-                      {testCase.description && (
-                        <p className="test-description">
-                          {testCase.description}
-                        </p>
-                      )}
+                        {testCase.description && (
+                          <p className="test-description">
+                            {testCase.description}
+                          </p>
+                        )}
 
-                      <div className="expected-result">
-                        <span>Expected Result</span>
-
-                        <p>
-                          {testCase.expected_result ||
-                            "Not specified"}
-                        </p>
-                      </div>
-
-                      {testCase.expected_status_code && (
                         <div className="expected-result">
                           <span>
-                            Expected Status Code
+                            Expected Result
                           </span>
 
                           <p>
-                            {testCase.expected_status_code}
+                            {testCase.expected_result ||
+                              "Not specified"}
                           </p>
                         </div>
-                      )}
 
-                      <div className="expected-result">
-                        <span>Execution Status</span>
+                        {testCase.expected_status_code && (
+                          <div className="expected-result">
+                            <span>
+                              Expected Status Code
+                            </span>
 
-                        <p>{statusUpper}</p>
+                            <p>
+                              {
+                                testCase.expected_status_code
+                              }
+                            </p>
+                          </div>
+                        )}
+
+                        <div className="expected-result">
+                          <span>
+                            Execution Status
+                          </span>
+
+                          <p>{statusUpper}</p>
+                        </div>
+
+                        {testCase.actual_result && (
+                          <div className="expected-result">
+                            <span>
+                              Actual Result
+                            </span>
+
+                            <p>
+                              {testCase.actual_result}
+                            </p>
+                          </div>
+                        )}
+
+                        {testCase.test_code && (
+                          <div className="expected-result">
+                            <span>
+                              Executable Test Code
+                            </span>
+
+                            <pre
+                              style={{
+                                marginTop: "10px",
+                                padding: "15px",
+                                background:
+                                  "#080b14",
+                                borderRadius:
+                                  "10px",
+                                overflowX:
+                                  "auto",
+                                color:
+                                  "#dbeafe",
+                                fontSize:
+                                  "12px",
+                                lineHeight:
+                                  "1.5",
+                                whiteSpace:
+                                  "pre-wrap",
+                              }}
+                            >
+                              {testCase.test_code}
+                            </pre>
+                          </div>
+                        )}
                       </div>
-
-                      {testCase.actual_result && (
-                        <div className="expected-result">
-                          <span>Actual Result</span>
-
-                          <p>
-                            {testCase.actual_result}
-                          </p>
-                        </div>
-                      )}
-
-                      {testCase.test_code && (
-                        <div className="expected-result">
-                          <span>Executable Test Code</span>
-
-                          <pre
-                            style={{
-                              marginTop: "10px",
-                              padding: "15px",
-                              background: "#080b14",
-                              borderRadius: "10px",
-                              overflowX: "auto",
-                              color: "#dbeafe",
-                              fontSize: "12px",
-                              lineHeight: "1.5",
-                              whiteSpace: "pre-wrap",
-                            }}
-                          >
-                            {testCase.test_code}
-                          </pre>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
+                    );
+                  }
+                )}
               </div>
             )}
           </section>
@@ -1365,10 +1816,13 @@ function App() {
           <section className="content-card">
             <div className="tests-header">
               <div>
-                <h2>Export Results</h2>
+                <h2>
+                  Export Results
+                </h2>
 
                 <p>
-                  Download your generated test cases.
+                  Download your generated test
+                  cases.
                 </p>
               </div>
             </div>
@@ -1377,7 +1831,9 @@ function App() {
               <button
                 className="export-btn excel-btn"
                 onClick={exportExcel}
-                disabled={testCases.length === 0}
+                disabled={
+                  testCases.length === 0
+                }
               >
                 Export Excel
               </button>
@@ -1385,7 +1841,9 @@ function App() {
               <button
                 className="export-btn pdf-btn"
                 onClick={exportPDF}
-                disabled={testCases.length === 0}
+                disabled={
+                  testCases.length === 0
+                }
               >
                 Export PDF
               </button>
@@ -1393,7 +1851,9 @@ function App() {
               <button
                 className="export-btn postman-btn"
                 onClick={exportPostman}
-                disabled={testCases.length === 0}
+                disabled={
+                  testCases.length === 0
+                }
               >
                 Export Postman
               </button>

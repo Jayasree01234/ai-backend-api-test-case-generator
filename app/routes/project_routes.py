@@ -1,14 +1,13 @@
-import json
-import os
-import re
-
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from typing import List
+import json
+import os
 
 from app import models, schemas
-from app.ai.generator import generate_ai_test_cases
-from app.auth import get_current_user
 from app.database import get_db
+from app.auth import get_current_user
+from app.ai_test import generate_ai_test_cases_for_api
 
 
 router = APIRouter(
@@ -17,21 +16,25 @@ router = APIRouter(
 )
 
 
+# ============================================================
+# GET USER PROJECT
+# ============================================================
+
 def get_user_project(
     project_id: int,
-    current_user: models.User,
+    user_id: int,
     db: Session
 ):
     project = (
         db.query(models.Project)
         .filter(
             models.Project.id == project_id,
-            models.Project.owner_id == current_user.id
+            models.Project.owner_id == user_id
         )
         .first()
     )
 
-    if project is None:
+    if not project:
         raise HTTPException(
             status_code=404,
             detail="Project not found"
@@ -40,286 +43,309 @@ def get_user_project(
     return project
 
 
-def make_unique_test_code(
-    code: str,
-    used_names: set
-):
-    if not code:
-        return ""
+# ============================================================
+# PARSE REQUEST DATA FOR GENERATED PYTEST FILE
+# ============================================================
 
-    match = re.search(
-        r"def\s+(test_[A-Za-z0-9_]+)\s*\(",
-        code
-    )
+def parse_request_data_for_file(value):
+    """
+    Converts request_data into a Python object that can
+    safely be written into the generated pytest file.
+    """
 
-    if match is None:
-        return code
+    if value is None:
+        return {}
 
-    original_name = match.group(1)
-    new_name = original_name
-    counter = 2
+    if isinstance(value, (dict, list)):
+        return value
 
-    while new_name in used_names:
-        new_name = f"{original_name}_{counter}"
-        counter += 1
+    if isinstance(value, str):
+        value = value.strip()
 
-    used_names.add(new_name)
+        if not value:
+            return {}
 
-    if new_name != original_name:
-        code = code.replace(
-            f"def {original_name}(",
-            f"def {new_name}(",
-            1
-        )
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return {}
 
-    return code
+    return {}
 
+
+# ============================================================
+# WRITE GENERATED TESTS TO FILE
+# ============================================================
 
 def write_generated_tests_to_file(
-    test_cases
+    project_id: int,
+    test_cases: list
 ):
-    project_root = os.path.abspath(
-        os.path.join(
-            os.path.dirname(__file__),
-            "..",
-            ".."
-        )
-    )
+    """
+    Creates a clean pytest file containing all generated
+    executable test cases.
 
-    tests_folder = os.path.join(
-        project_root,
+    The generated file is:
+        tests/test_generated_cases.py
+    """
+
+    tests_directory = os.path.join(
+        os.getcwd(),
         "tests"
     )
 
     os.makedirs(
-        tests_folder,
+        tests_directory,
         exist_ok=True
     )
 
-    test_file = os.path.join(
-        tests_folder,
+    file_path = os.path.join(
+        tests_directory,
         "test_generated_cases.py"
     )
 
-    header = """import requests
-
-
-BASE_URL = "http://127.0.0.1:8000"
-
-
-"""
-
-    used_names = set()
-    test_functions = []
-
-    for index, test_case in enumerate(
-        test_cases,
-        start=1
-    ):
-        test_code = test_case.get(
-            "test_code",
-            ""
-        )
-
-        if test_code:
-            test_code = make_unique_test_code(
-                test_code,
-                used_names
-            )
-
-            test_functions.append(
-                test_code.strip()
-            )
-
-            continue
-
-        method = str(
-            test_case.get(
-                "method",
-                "GET"
-            )
-        ).upper()
-
-        endpoint = test_case.get(
-            "endpoint",
-            "/"
-        )
-
-        title = test_case.get(
-            "title",
-            f"Generated Test Case {index}"
-        )
-
-        test_name = re.sub(
-            r"[^a-zA-Z0-9_]+",
-            "_",
-            title.lower()
-        ).strip("_")
-
-        if not test_name:
-            test_name = f"generated_test_{index}"
-
-        test_name = f"test_{test_name}"
-
-        if test_name in used_names:
-            test_name = f"{test_name}_{index}"
-
-        used_names.add(test_name)
-
-        request_data = test_case.get(
-            "request_data",
-            {}
-        )
-
-        if isinstance(
-            request_data,
-            str
-        ):
-            try:
-                request_data = json.loads(
-                    request_data
-                )
-            except Exception:
-                request_data = {}
-
-        if not isinstance(
-            request_data,
-            dict
-        ):
-            request_data = {}
-
-        request_json = json.dumps(
-            request_data,
-            indent=4
-        )
-
-        expected_status = test_case.get(
-            "expected_status_code"
-        )
-
-        if expected_status is None:
-            expected_result = test_case.get(
-                "expected_result",
-                ""
-            )
-
-            status_match = re.search(
-                r"\b([1-5][0-9]{2})\b",
-                str(expected_result)
-            )
-
-            if status_match:
-                expected_status = int(
-                    status_match.group(1)
-                )
-            else:
-                expected_status = 200
-
-        try:
-            expected_status = int(
-                expected_status
-            )
-        except (
-            ValueError,
-            TypeError
-        ):
-            expected_status = 200
-
-        executable_endpoint = re.sub(
-            r"\{[A-Za-z_][A-Za-z0-9_]*\}",
-            "1",
-            endpoint
-        )
-
-        if method == "GET":
-            code = f"""# {title}
-def {test_name}():
-    response = requests.get(
-        f"{{BASE_URL}}{executable_endpoint}"
-    )
-    assert response.status_code == {expected_status}
-"""
-
-        elif method == "POST":
-            code = f"""# {title}
-def {test_name}():
-    payload = {request_json}
-    response = requests.post(
-        f"{{BASE_URL}}{executable_endpoint}",
-        json=payload
-    )
-    assert response.status_code == {expected_status}
-"""
-
-        elif method == "PUT":
-            code = f"""# {title}
-def {test_name}():
-    payload = {request_json}
-    response = requests.put(
-        f"{{BASE_URL}}{executable_endpoint}",
-        json=payload
-    )
-    assert response.status_code == {expected_status}
-"""
-
-        elif method == "PATCH":
-            code = f"""# {title}
-def {test_name}():
-    payload = {request_json}
-    response = requests.patch(
-        f"{{BASE_URL}}{executable_endpoint}",
-        json=payload
-    )
-    assert response.status_code == {expected_status}
-"""
-
-        elif method == "DELETE":
-            code = f"""# {title}
-def {test_name}():
-    response = requests.delete(
-        f"{{BASE_URL}}{executable_endpoint}"
-    )
-    assert response.status_code == {expected_status}
-"""
-
-        else:
-            code = f"""# {title}
-def {test_name}():
-    response = requests.request(
-        "{method}",
-        f"{{BASE_URL}}{executable_endpoint}"
-    )
-    assert response.status_code == {expected_status}
-"""
-
-        test_functions.append(
-            code.strip()
-        )
-
     with open(
-        test_file,
+        file_path,
         "w",
         encoding="utf-8"
     ) as file:
-        file.write(header)
 
-        for test_function in test_functions:
-            file.write(test_function)
-            file.write("\n\n\n")
+        file.write(
+            '"""Automatically generated API test cases."""\n\n'
+        )
 
-    return test_file
+        file.write(
+            "import requests\n\n"
+        )
 
+        file.write(
+            'BASE_URL = "http://127.0.0.1:8000"\n'
+        )
+
+        file.write(
+            "REQUEST_TIMEOUT = 15\n\n\n"
+        )
+
+        # --------------------------------------------------------
+        # Create one pytest function for each test case
+        # --------------------------------------------------------
+
+        for index, test_case in enumerate(
+            test_cases,
+            start=1
+        ):
+
+            title = str(
+                test_case.get(
+                    "title",
+                    f"Generated Test Case {index}"
+                )
+            ).strip()
+
+            method = str(
+                test_case.get(
+                    "method",
+                    "GET"
+                )
+            ).upper().strip()
+
+            endpoint = str(
+                test_case.get(
+                    "endpoint",
+                    "/"
+                )
+            ).strip()
+
+            if not endpoint.startswith(
+                "/"
+            ) and not endpoint.startswith(
+                "http://"
+            ) and not endpoint.startswith(
+                "https://"
+            ):
+                endpoint = "/" + endpoint
+
+            request_data = (
+                parse_request_data_for_file(
+                    test_case.get(
+                        "request_data",
+                        {}
+                    )
+                )
+            )
+
+            expected_status_code = test_case.get(
+                "expected_status_code"
+            )
+
+            # ----------------------------------------------------
+            # Unique pytest function name
+            # ----------------------------------------------------
+
+            function_name = (
+                f"test_generated_case_{index}"
+            )
+
+            # ----------------------------------------------------
+            # Write test function
+            # ----------------------------------------------------
+
+            file.write(
+                f"def {function_name}():\n"
+            )
+
+            file.write(
+                f'    """{title}"""\n'
+            )
+
+            # ----------------------------------------------------
+            # URL
+            # ----------------------------------------------------
+
+            if (
+                endpoint.startswith("http://")
+                or endpoint.startswith("https://")
+            ):
+                file.write(
+                    f'    url = {endpoint!r}\n'
+                )
+            else:
+                file.write(
+                    f'    url = BASE_URL + {endpoint!r}\n'
+                )
+
+            # ----------------------------------------------------
+            # GET
+            # ----------------------------------------------------
+
+            if method == "GET":
+
+                file.write(
+                    "    response = requests.get(\n"
+                    "        url,\n"
+                    "        timeout=REQUEST_TIMEOUT\n"
+                    "    )\n"
+                )
+
+            # ----------------------------------------------------
+            # POST
+            # ----------------------------------------------------
+
+            elif method == "POST":
+
+                request_json = json.dumps(
+                    request_data,
+                    indent=4
+                )
+
+                file.write(
+                    "    response = requests.post(\n"
+                    "        url,\n"
+                    f"        json={request_json},\n"
+                    "        timeout=REQUEST_TIMEOUT\n"
+                    "    )\n"
+                )
+
+            # ----------------------------------------------------
+            # PUT
+            # ----------------------------------------------------
+
+            elif method == "PUT":
+
+                request_json = json.dumps(
+                    request_data,
+                    indent=4
+                )
+
+                file.write(
+                    "    response = requests.put(\n"
+                    "        url,\n"
+                    f"        json={request_json},\n"
+                    "        timeout=REQUEST_TIMEOUT\n"
+                    "    )\n"
+                )
+
+            # ----------------------------------------------------
+            # PATCH
+            # ----------------------------------------------------
+
+            elif method == "PATCH":
+
+                request_json = json.dumps(
+                    request_data,
+                    indent=4
+                )
+
+                file.write(
+                    "    response = requests.patch(\n"
+                    "        url,\n"
+                    f"        json={request_json},\n"
+                    "        timeout=REQUEST_TIMEOUT\n"
+                    "    )\n"
+                )
+
+            # ----------------------------------------------------
+            # DELETE
+            # ----------------------------------------------------
+
+            elif method == "DELETE":
+
+                file.write(
+                    "    response = requests.delete(\n"
+                    "        url,\n"
+                    "        timeout=REQUEST_TIMEOUT\n"
+                    "    )\n"
+                )
+
+            # ----------------------------------------------------
+            # Other HTTP methods
+            # ----------------------------------------------------
+
+            else:
+
+                request_json = json.dumps(
+                    request_data,
+                    indent=4
+                )
+
+                file.write(
+                    "    response = requests.request(\n"
+                    f"        {method!r},\n"
+                    "        url,\n"
+                    f"        json={request_json},\n"
+                    "        timeout=REQUEST_TIMEOUT\n"
+                    "    )\n"
+                )
+
+            # ----------------------------------------------------
+            # Assertion
+            # ----------------------------------------------------
+
+            if expected_status_code is not None:
+
+                file.write(
+                    f"    assert response.status_code == "
+                    f"{expected_status_code}\n"
+                )
+
+            file.write("\n\n")
+
+    return file_path
+
+
+# ============================================================
+# GET MY PROJECTS
+# ============================================================
 
 @router.get(
     "/",
-    response_model=list[schemas.ProjectResponse]
+    response_model=List[schemas.ProjectResponse]
 )
 def get_projects(
-    current_user: models.User = Depends(
-        get_current_user
-    ),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
 ):
+
     projects = (
         db.query(models.Project)
         .filter(
@@ -331,17 +357,20 @@ def get_projects(
     return projects
 
 
+# ============================================================
+# CREATE PROJECT
+# ============================================================
+
 @router.post(
     "/",
     response_model=schemas.ProjectResponse
 )
 def create_project(
     project: schemas.ProjectCreate,
-    current_user: models.User = Depends(
-        get_current_user
-    ),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
 ):
+
     new_project = models.Project(
         name=project.name,
         description=project.description,
@@ -349,27 +378,40 @@ def create_project(
     )
 
     db.add(new_project)
+
     db.commit()
+
     db.refresh(new_project)
 
     return new_project
 
 
+# ============================================================
+# GENERATE AND EXECUTE PROJECT TEST CASES
+# ============================================================
+
 @router.post(
     "/{project_id}/generate"
 )
-def generate_test_cases(
+def generate_project_test_cases(
     project_id: int,
-    current_user: models.User = Depends(
-        get_current_user
-    ),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
 ):
+
+    # --------------------------------------------------------
+    # Check project ownership
+    # --------------------------------------------------------
+
     project = get_user_project(
         project_id,
-        current_user,
+        current_user.id,
         db
     )
+
+    # --------------------------------------------------------
+    # Get APIs belonging to project
+    # --------------------------------------------------------
 
     apis = (
         db.query(models.API)
@@ -380,223 +422,334 @@ def generate_test_cases(
     )
 
     if not apis:
+
         raise HTTPException(
-            status_code=400,
+            status_code=404,
             detail="No APIs found in this project"
         )
 
-    generated_test_cases = []
+    all_generated_cases = []
+
+    generated_count = 0
+
+    # --------------------------------------------------------
+    # Generate and execute tests for every API
+    # --------------------------------------------------------
 
     for api in apis:
+
         try:
-            test_cases = generate_ai_test_cases(api)
 
-        except Exception as error:
-            print(
-                f"Error generating tests for "
-                f"{api.method} {api.endpoint}: "
-                f"{error}"
+            test_cases = (
+                generate_ai_test_cases_for_api(api)
             )
-            continue
 
-        if not test_cases:
-            continue
-
-        if not isinstance(
-            test_cases,
-            list
-        ):
-            continue
-
-        for test_case in test_cases:
-            if not isinstance(
-                test_case,
-                dict
-            ):
+            if not test_cases:
                 continue
 
-            title = test_case.get(
-                "title",
-                "Generated Test Case"
-            )
+            for test_case in test_cases:
 
-            method = test_case.get(
-                "method",
-                api.method
-            )
+                # ------------------------------------------------
+                # Request data
+                # ------------------------------------------------
 
-            endpoint = test_case.get(
-                "endpoint",
-                api.endpoint
-            )
-
-            test_type = test_case.get(
-                "test_type",
-                "Functional"
-            )
-
-            description = test_case.get(
-                "description",
-                ""
-            )
-
-            request_data = test_case.get(
-                "request_data",
-                {}
-            )
-
-            expected_result = test_case.get(
-                "expected_result",
-                ""
-            )
-
-            expected_status_code = test_case.get(
-                "expected_status_code"
-            )
-
-            if isinstance(
-                request_data,
-                (dict, list)
-            ):
-                request_data_for_db = json.dumps(
-                    request_data
-                )
-            else:
-                request_data_for_db = str(
-                    request_data
+                request_data = test_case.get(
+                    "request_data",
+                    {}
                 )
 
-            if expected_status_code is None:
-                status_match = re.search(
-                    r"\b([1-5][0-9]{2})\b",
-                    str(expected_result)
-                )
+                if isinstance(
+                    request_data,
+                    (dict, list)
+                ):
 
-                if status_match:
-                    expected_status_code = int(
-                        status_match.group(1)
+                    request_data = json.dumps(
+                        request_data
                     )
+
+                elif request_data is None:
+
+                    request_data = ""
+
                 else:
-                    expected_status_code = 200
 
-            try:
-                expected_status_code = int(
-                    expected_status_code
-                )
-            except (
-                ValueError,
-                TypeError
-            ):
-                expected_status_code = 200
+                    request_data = str(
+                        request_data
+                    )
 
-            database_test_case = models.TestCase(
-                api_id=api.id,
-                title=title,
-                method=method,
-                endpoint=endpoint,
-                test_type=test_type,
-                description=description,
-                request_data=request_data_for_db,
-                expected_result=expected_result,
-                expected_status_code=expected_status_code,
-                test_code=test_case.get(
-                    "test_code",
+                # ------------------------------------------------
+                # Expected result
+                # ------------------------------------------------
+
+                expected_result = test_case.get(
+                    "expected_result",
                     ""
-                ),
-                actual_result=test_case.get(
+                )
+
+                if isinstance(
+                    expected_result,
+                    (dict, list)
+                ):
+
+                    expected_result = json.dumps(
+                        expected_result
+                    )
+
+                elif expected_result is None:
+
+                    expected_result = ""
+
+                else:
+
+                    expected_result = str(
+                        expected_result
+                    )
+
+                # ------------------------------------------------
+                # Actual result
+                # ------------------------------------------------
+
+                actual_result = test_case.get(
                     "actual_result",
                     ""
-                ),
-                execution_status=test_case.get(
-                    "execution_status",
-                    "NOT RUN"
                 )
-            )
 
-            db.add(database_test_case)
+                if isinstance(
+                    actual_result,
+                    (dict, list)
+                ):
 
-            generated_test_cases.append(
-                {
-                    "title": title,
-                    "method": method,
-                    "endpoint": endpoint,
-                    "test_type": test_type,
-                    "description": description,
-                    "request_data": request_data,
-                    "expected_result": expected_result,
-                    "expected_status_code": expected_status_code,
-                    "test_code": test_case.get(
-                        "test_code",
+                    actual_result = json.dumps(
+                        actual_result
+                    )
+
+                elif actual_result is None:
+
+                    actual_result = ""
+
+                else:
+
+                    actual_result = str(
+                        actual_result
+                    )
+
+                # ------------------------------------------------
+                # Test code
+                # ------------------------------------------------
+
+                test_code = test_case.get(
+                    "test_code",
+                    ""
+                )
+
+                # ------------------------------------------------
+                # Save test case to database
+                # ------------------------------------------------
+
+                test_case_record = models.TestCase(
+
+                    api_id=api.id,
+
+                    title=test_case.get(
+                        "title",
+                        "Generated Test Case"
+                    ),
+
+                    method=test_case.get(
+                        "method",
+                        api.method
+                    ),
+
+                    endpoint=test_case.get(
+                        "endpoint",
+                        api.endpoint
+                    ),
+
+                    test_type=test_case.get(
+                        "test_type",
+                        "functional"
+                    ),
+
+                    description=test_case.get(
+                        "description",
                         ""
                     ),
-                    "actual_result": test_case.get(
-                        "actual_result",
-                        ""
+
+                    request_data=request_data,
+
+                    expected_result=expected_result,
+
+                    expected_status_code=test_case.get(
+                        "expected_status_code"
                     ),
-                    "execution_status": test_case.get(
+
+                    test_code=test_code,
+
+                    actual_result=actual_result,
+
+                    execution_status=test_case.get(
                         "execution_status",
                         "NOT RUN"
                     )
-                }
+                )
+
+                db.add(
+                    test_case_record
+                )
+
+                # ------------------------------------------------
+                # Add to response
+                # ------------------------------------------------
+
+                all_generated_cases.append(
+                    {
+                        "api_id": api.id,
+
+                        "title":
+                            test_case_record.title,
+
+                        "method":
+                            test_case_record.method,
+
+                        "endpoint":
+                            test_case_record.endpoint,
+
+                        "test_type":
+                            test_case_record.test_type,
+
+                        "description":
+                            test_case_record.description,
+
+                        "request_data":
+                            request_data,
+
+                        "expected_result":
+                            expected_result,
+
+                        "expected_status_code":
+                            test_case_record.expected_status_code,
+
+                        "test_code":
+                            test_code,
+
+                        "actual_result":
+                            actual_result,
+
+                        "execution_status":
+                            test_case_record.execution_status
+                    }
+                )
+
+                generated_count += 1
+
+        except Exception as error:
+
+            print(
+                f"Error generating tests for "
+                f"{api.method} {api.endpoint}: {error}"
             )
 
-    if not generated_test_cases:
-        db.rollback()
+            continue
 
-        raise HTTPException(
-            status_code=500,
-            detail="No test cases were generated"
-        )
+    # --------------------------------------------------------
+    # Commit generated test cases
+    # --------------------------------------------------------
 
     db.commit()
 
-    write_generated_tests_to_file(
-        generated_test_cases
-    )
+    # --------------------------------------------------------
+    # Check if generation failed for every API
+    # --------------------------------------------------------
+
+    if not all_generated_cases:
+
+        raise HTTPException(
+            status_code=500,
+            detail="Test case generation failed for all APIs"
+        )
+
+    # --------------------------------------------------------
+    # Write generated Python tests to file
+    # --------------------------------------------------------
+
+    try:
+
+        write_generated_tests_to_file(
+            project_id,
+            all_generated_cases
+        )
+
+    except Exception as error:
+
+        print(
+            f"Warning: could not write generated "
+            f"test file: {error}"
+        )
+
+    # --------------------------------------------------------
+    # Return result
+    # --------------------------------------------------------
 
     return {
-        "message": "Test cases generated successfully",
-        "project_id": project.id,
-        "apis_processed": len(apis),
-        "test_cases_generated": len(
-            generated_test_cases
-        ),
-        "test_file": "tests/test_generated_cases.py",
-        "test_cases": generated_test_cases
+        "message":
+            "Test cases generated and executed successfully",
+
+        "project_id":
+            project_id,
+
+        "api_count":
+            len(apis),
+
+        "test_case_count":
+            generated_count,
+
+        "test_cases":
+            all_generated_cases
     }
 
+
+# ============================================================
+# GET PROJECT TEST CASES
+# ============================================================
 
 @router.get(
     "/{project_id}/test-cases"
 )
-def get_test_cases(
+def get_project_test_cases(
     project_id: int,
-    current_user: models.User = Depends(
-        get_current_user
-    ),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
 ):
+
+    # --------------------------------------------------------
+    # Check project ownership
+    # --------------------------------------------------------
+
     project = get_user_project(
         project_id,
-        current_user,
+        current_user.id,
         db
     )
 
-    apis = (
-        db.query(models.API)
-        .filter(
-            models.API.project_id == project.id
-        )
-        .all()
-    )
-
-    if not apis:
-        return []
+    # --------------------------------------------------------
+    # Get API IDs
+    # --------------------------------------------------------
 
     api_ids = [
         api.id
-        for api in apis
+        for api in project.apis
     ]
+
+    if not api_ids:
+
+        return {
+            "project_id": project_id,
+            "test_cases": []
+        }
+
+    # --------------------------------------------------------
+    # Get test cases
+    # --------------------------------------------------------
 
     test_cases = (
         db.query(models.TestCase)
@@ -606,4 +759,57 @@ def get_test_cases(
         .all()
     )
 
-    return test_cases
+    result = []
+
+    for test_case in test_cases:
+
+        result.append(
+            {
+                "id":
+                    test_case.id,
+
+                "api_id":
+                    test_case.api_id,
+
+                "title":
+                    test_case.title,
+
+                "method":
+                    test_case.method,
+
+                "endpoint":
+                    test_case.endpoint,
+
+                "test_type":
+                    test_case.test_type,
+
+                "description":
+                    test_case.description,
+
+                "request_data":
+                    test_case.request_data,
+
+                "expected_result":
+                    test_case.expected_result,
+
+                "expected_status_code":
+                    test_case.expected_status_code,
+
+                "test_code":
+                    test_case.test_code,
+
+                "actual_result":
+                    test_case.actual_result,
+
+                "execution_status":
+                    test_case.execution_status
+            }
+        )
+
+    return {
+        "project_id":
+            project_id,
+
+        "test_cases":
+            result
+    }
