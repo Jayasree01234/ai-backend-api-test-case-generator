@@ -1,11 +1,20 @@
 import { useEffect, useState } from "react";
+import * as yaml from "js-yaml";
 import "./App.css";
-
+import { registerUser, loginUser } from "./services/authService";
+import {
+  getProjects,
+  createProject as createProjectInSupabase,
+  getProjectApis,
+  createProjectApis,
+} from "./services/projectService";
 const API_BASE_URL = "http://127.0.0.1:8000";
 
 function App() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [targetLanguage, setTargetLanguage] = useState("Python");
+const [targetFramework, setTargetFramework] = useState("Pytest");
 
   // =====================================================
   // AUTHENTICATION
@@ -91,153 +100,103 @@ const [projectName, setProjectName] = useState(
   }, [loggedIn, token]);
 
   const fetchProjects = async () => {
-    if (!token) {
-      return;
-    }
+  setProjectsLoading(true);
+  setProjectError("");
 
-    setProjectsLoading(true);
+  try {
+    const data = await getProjects();
 
-    try {
-      const response = await fetch(`${API_BASE_URL}/projects/`, {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
+    setProjects(Array.isArray(data) ? data : []);
+  } catch (error) {
+    console.error("Fetch projects error:", error);
 
-      const data = await response.json();
-
-      if (response.status === 401) {
-        handleLogout();
-        return;
-      }
-
-      if (!response.ok) {
-        throw new Error(data.detail || "Failed to fetch projects");
-      }
-
-      setProjects(Array.isArray(data) ? data : []);
-    } catch (error) {
-      console.error("Fetch projects error:", error);
-      setProjectError(error.message);
-    } finally {
-      setProjectsLoading(false);
-    }
-  };
-
+    setProjectError(
+      error.message || "Failed to fetch projects"
+    );
+  } finally {
+    setProjectsLoading(false);
+  }
+};
   // =====================================================
   // LOGIN
   // =====================================================
 
-  const handleLogin = async (event) => {
-    event.preventDefault();
+const handleLogin = async (event) => {
+  event.preventDefault();
 
-    setLoginError("");
-    setLoggingIn(true);
+  setLoginError("");
+  setLoggingIn(true);
 
-    try {
-      const response = await fetch(`${API_BASE_URL}/auth/login`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          email,
-          password,
-        }),
-      });
+  try {
+    const data = await loginUser(email, password);
 
-      const data = await response.json();
+    const accessToken = data?.session?.access_token;
 
-      if (!response.ok) {
-        throw new Error(data.detail || "Login failed");
-      }
-
-      if (!data.access_token) {
-        throw new Error(
-          "Login succeeded but no access token was returned."
-        );
-      }
-
-      // Store token after successful login.
-      localStorage.setItem("access_token", data.access_token);
-
-      setToken(data.access_token);
-      setLoggedIn(true);
-
-      setEmail("");
-      setPassword("");
-
-      setProjectId(null);
-      setProjectName("");
-      setProjectDescription("");
-
-      setImportedApis([]);
-      setTestCases([]);
-    } catch (error) {
-      setLoginError(error.message);
-    } finally {
-      setLoggingIn(false);
+    if (!accessToken) {
+      throw new Error("Login succeeded but no access token was returned.");
     }
-  };
 
+    localStorage.setItem("access_token", accessToken);
+
+    setToken(accessToken);
+    setLoggedIn(true);
+
+    setEmail("");
+    setPassword("");
+
+    setProjectId(null);
+    setProjectName("");
+    setProjectDescription("");
+
+    setImportedApis([]);
+    setTestCases([]);
+  } catch (error) {
+    setLoginError(
+      error.message || "Login failed"
+    );
+  } finally {
+    setLoggingIn(false);
+  }
+};
   // =====================================================
   // REGISTER
   // =====================================================
 
   const handleRegister = async (event) => {
-    event.preventDefault();
+  event.preventDefault();
 
-    setRegisterError("");
-    setRegisterSuccess("");
-    setRegistering(true);
+  setRegisterError("");
+  setRegisterSuccess("");
+  setRegistering(true);
 
-    try {
-      const response = await fetch(`${API_BASE_URL}/auth/register`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          name: registerName,
-          email: registerEmail,
-          password: registerPassword,
-        }),
-      });
+  try {
+    await registerUser(
+      registerName,
+      registerEmail,
+      registerPassword
+    );
 
-      const data = await response.json();
+    setRegisterSuccess(
+      "Registration successful! Please check your email to confirm your account."
+    );
 
-      if (!response.ok) {
-        throw new Error(
-          data.detail ||
-            data.message ||
-            "Registration failed"
-        );
-      }
+    setRegisterName("");
+    setRegisterEmail("");
+    setRegisterPassword("");
 
-      // Registration successful.
-      setRegisterSuccess(
-        "Registration successful! Please login with your new account."
-      );
+    setShowRegister(false);
 
-      setRegisterName("");
-      setRegisterEmail("");
-      setRegisterPassword("");
-
-      // Switch back to login after successful registration.
-      setShowRegister(false);
-
-      // Clear login fields so user can enter credentials.
-      setEmail("");
-      setPassword("");
-      setLoginError("");
-    } catch (error) {
-      setRegisterError(error.message);
-    } finally {
-      setRegistering(false);
-    }
-  };
-
+    setEmail("");
+    setPassword("");
+    setLoginError("");
+  } catch (error) {
+    setRegisterError(
+      error.message || "Registration failed"
+    );
+  } finally {
+    setRegistering(false);
+  }
+};
   // =====================================================
   // LOGOUT
   // =====================================================
@@ -285,179 +244,107 @@ const [projectName, setProjectName] = useState(
   // =====================================================
   // CREATE PROJECT
   // =====================================================
-
-  const createProject = async (event) => {
-    event.preventDefault();
-
-    setProjectError("");
-    setCreatingProject(true);
-
-    try {
-      const response = await fetch(`${API_BASE_URL}/projects/`, {
-        method: "POST",
-        headers: getAuthHeaders(),
-        body: JSON.stringify({
-          name: projectName,
-          description: projectDescription,
-        }),
-      });
-
-      const data = await response.json();
-
-      if (response.status === 401) {
-        handleLogout();
-        return;
-      }
-
-      if (!response.ok) {
-        throw new Error(
-          data.detail || "Failed to create project"
-        );
-      }
-
-      localStorage.setItem("current_project_id", data.id);
-      localStorage.setItem(
-        "current_project_name",
-        data.name || ""
-      );
-      localStorage.setItem(
-        "current_project_description",
-        data.description || ""
-      );
-
-      setProjectId(data.id);
-      setProjectName(data.name || "");
-      setProjectDescription(data.description || "");
-
-      setImportedApis([]);
-      setTestCases([]);
-
-      setShowCreateProject(false);
-
-      await fetchProjects();
-    } catch (error) {
-      setProjectError(error.message);
-    } finally {
-      setCreatingProject(false);
-    }
-  };
-
   const startNewProject = () => {
-    localStorage.removeItem("current_project_id");
-    localStorage.removeItem("current_project_name");
-    localStorage.removeItem("current_project_description");
+  setProjectError("");
+  setProjectName("");
+  setProjectDescription("");
+  setProjectId(null);
+  setImportedApis([]);
+  setTestCases([]);
+  setShowCreateProject(true);
+};
+  const createProject = async (event) => {
+  event.preventDefault();
 
-    setProjectId(null);
-    setProjectName("");
-    setProjectDescription("");
+  setProjectError("");
+  setCreatingProject(true);
+
+  try {
+    const data = await createProjectInSupabase(
+      projectName,
+      projectDescription
+    );
+
+    localStorage.setItem(
+      "current_project_id",
+      data.id
+    );
+
+    localStorage.setItem(
+      "current_project_name",
+      data.name || ""
+    );
+
+    localStorage.setItem(
+      "current_project_description",
+      data.description || ""
+    );
+
+    setProjectId(data.id);
+    setProjectName(data.name || "");
+    setProjectDescription(data.description || "");
 
     setImportedApis([]);
     setTestCases([]);
 
-    setSelectedFile(null);
-    setUploadMessage("");
-    setUploadError("");
-    setGenerateError("");
-    setProjectError("");
+    setShowCreateProject(false);
 
-    setShowCreateProject(true);
-  };
+    await fetchProjects();
+  } catch (error) {
+    console.error("Create project error:", error);
 
+    setProjectError(
+      error.message || "Failed to create project"
+    );
+  } finally {
+    setCreatingProject(false);
+  }
+};
   // =====================================================
   // OPEN PROJECT
   // =====================================================
+const openProject = async (project) => {
+  setOpeningProject(true);
+  setProjectError("");
 
-  const openProject = async (project) => {
-    setOpeningProject(true);
-    setProjectError("");
+  try {
+    localStorage.setItem(
+      "current_project_id",
+      project.id
+    );
 
-    try {
-      localStorage.setItem("current_project_id", project.id);
-      localStorage.setItem(
-        "current_project_name",
-        project.name || ""
-      );
-      localStorage.setItem(
-        "current_project_description",
-        project.description || ""
-      );
+    localStorage.setItem(
+      "current_project_name",
+      project.name || ""
+    );
 
-      setProjectId(project.id);
-      setProjectName(project.name || "");
-      setProjectDescription(project.description || "");
+    localStorage.setItem(
+      "current_project_description",
+      project.description || ""
+    );
 
-      const response = await fetch(
-        `${API_BASE_URL}/projects/${project.id}/apis`,
-        {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
-      );
+    setProjectId(project.id);
+    setProjectName(project.name || "");
+    setProjectDescription(project.description || "");
 
-      const data = await response.json();
+    const apiList = await getProjectApis(project.id);
 
-      if (response.status === 401) {
-        handleLogout();
-        return;
-      }
+    setImportedApis(
+      Array.isArray(apiList) ? apiList : []
+    );
 
-      if (!response.ok) {
-        throw new Error(
-          data.detail || "Failed to load project APIs"
-        );
-      }
+    setTestCases([]);
+  } catch (error) {
+    console.error("Open project error:", error);
 
-      setImportedApis(Array.isArray(data) ? data : []);
-
-      await loadTestCases(project.id);
-    } catch (error) {
-      setProjectError(error.message);
-    } finally {
-      setOpeningProject(false);
-    }
-  };
-
-  // =====================================================
-  // LOAD TEST CASES
-  // =====================================================
-
-  const loadTestCases = async (selectedProjectId) => {
-    if (!token) {
-      return;
-    }
-
-    try {
-      const response = await fetch(
-        `${API_BASE_URL}/projects/${selectedProjectId}/test-cases`,
-        {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
-      );
-
-      if (response.status === 401) {
-        handleLogout();
-        return;
-      }
-
-      if (!response.ok) {
-        setTestCases([]);
-        return;
-      }
-
-      const data = await response.json();
-
-      setTestCases(Array.isArray(data) ? data : []);
-    } catch (error) {
-      console.error("Load test cases error:", error);
-      setTestCases([]);
-    }
-  };
-
+    setProjectError(
+      error.message || "Failed to open project"
+    );
+  } finally {
+    setOpeningProject(false);
+  }
+};
+ 
   // =====================================================
   // BACK TO PROJECTS
   // =====================================================
@@ -500,94 +387,145 @@ const [projectName, setProjectName] = useState(
       setUploadMessage(`Selected file: ${file.name}`);
     }
   };
-
-  const uploadOpenAPI = async () => {
-    if (!projectId) {
-      setUploadError(
-        "Please create or open a project first."
-      );
-      return;
-    }
-
-    if (!selectedFile) {
-      setUploadError(
-        "Please select an OpenAPI JSON or YAML file."
-      );
-      return;
-    }
-
-    setUploading(true);
-    setUploadMessage(
-      `Uploading ${selectedFile.name}...`
+const uploadOpenAPI = async () => {
+  if (!projectId) {
+    setUploadError(
+      "Please create or open a project first."
     );
-    setUploadError("");
+    return;
+  }
 
-    try {
-      const formData = new FormData();
+  if (!selectedFile) {
+    setUploadError(
+      "Please select an OpenAPI JSON or YAML file."
+    );
+    return;
+  }
 
-      formData.append("file", selectedFile);
+  setUploading(true);
+  setUploadError("");
+  setUploadMessage(
+    `Processing ${selectedFile.name}...`
+  );
 
-      const response = await fetch(
-        `${API_BASE_URL}/projects/${projectId}/import-openapi`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-          body: formData,
-        }
+  try {
+    const fileName = selectedFile.name;
+    const fileText = await selectedFile.text();
+
+    let spec;
+
+    if (fileName.toLowerCase().endsWith(".json")) {
+      spec = JSON.parse(fileText);
+    } else if (
+      fileName.toLowerCase().endsWith(".yaml") ||
+      fileName.toLowerCase().endsWith(".yml")
+    ) {
+      spec = yaml.load(fileText);
+    } else {
+      throw new Error(
+        "Unsupported file type. Please upload JSON or YAML."
       );
-
-      const data = await response.json();
-
-      if (response.status === 401) {
-        handleLogout();
-        return;
-      }
-
-      if (!response.ok) {
-        throw new Error(
-          data.detail || "File upload failed"
-        );
-      }
-
-      const apiResponse = await fetch(
-        `${API_BASE_URL}/projects/${projectId}/apis`,
-        {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
-      );
-
-      let apiList = [];
-
-      if (apiResponse.ok) {
-        apiList = await apiResponse.json();
-      }
-
-      setImportedApis(
-        Array.isArray(apiList) ? apiList : []
-      );
-
-      const count = Array.isArray(apiList)
-        ? apiList.length
-        : 0;
-
-      setUploadMessage(
-        `File uploaded successfully! ${count} API(s) imported.`
-      );
-
-      setSelectedFile(null);
-    } catch (error) {
-      setUploadError(error.message);
-      setUploadMessage("");
-    } finally {
-      setUploading(false);
     }
-  };
 
+    if (
+      !spec ||
+      typeof spec !== "object" ||
+      !spec.paths
+    ) {
+      throw new Error(
+        "Invalid OpenAPI specification: paths were not found."
+      );
+    }
+
+    const apisToInsert = [];
+
+    for (const [path, pathItem] of Object.entries(
+      spec.paths
+    )) {
+      if (
+        !pathItem ||
+        typeof pathItem !== "object"
+      ) {
+        continue;
+      }
+
+      for (const [method, operation] of Object.entries(
+        pathItem
+      )) {
+        const upperMethod = method.toUpperCase();
+
+        const supportedMethods = [
+          "GET",
+          "POST",
+          "PUT",
+          "PATCH",
+          "DELETE",
+          "OPTIONS",
+          "HEAD",
+        ];
+
+        if (
+          !supportedMethods.includes(upperMethod)
+        ) {
+          continue;
+        }
+
+        let requestBody = "";
+
+        if (operation?.requestBody) {
+          requestBody = JSON.stringify(
+            operation.requestBody.content?.[
+              "application/json"
+            ]?.schema ||
+              operation.requestBody.content ||
+              operation.requestBody
+          );
+        }
+
+        apisToInsert.push({
+          project_id: projectId,
+          method: upperMethod,
+          endpoint: path,
+          request_body: requestBody,
+        });
+      }
+    }
+
+    if (apisToInsert.length === 0) {
+      throw new Error(
+        "No API endpoints were found in the OpenAPI specification."
+      );
+    }
+
+    const savedApis = await createProjectApis(
+      apisToInsert
+    );
+
+    setImportedApis(
+      Array.isArray(savedApis)
+        ? savedApis
+        : []
+    );
+
+    setSelectedFile(null);
+
+    setUploadMessage(
+      `Successfully imported ${savedApis.length} API endpoint(s) from ${fileName}.`
+    );
+  } catch (error) {
+    console.error(
+      "OpenAPI import error:",
+      error
+    );
+
+    setUploadError(
+      error.message ||
+        "Failed to import OpenAPI specification."
+    );
+  } finally {
+    setUploading(false);
+  }
+};
   // =====================================================
   // GENERATE TEST CASES
   // =====================================================
