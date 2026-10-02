@@ -1,536 +1,644 @@
 import { useEffect, useState } from "react";
 import * as yaml from "js-yaml";
+import { generateTestsWithAI } from "./services/aiService";
 import "./App.css";
-import { registerUser, loginUser } from "./services/authService";
+
+import {
+  registerUser,
+  loginUser,
+  logoutUser,
+  getCurrentUser,
+} from "./services/authService";
+
 import {
   getProjects,
   createProject as createProjectInSupabase,
   getProjectApis,
+  createProjectApi,
   createProjectApis,
 } from "./services/projectService";
-const API_BASE_URL = "http://127.0.0.1:8000";
 
 function App() {
+  // =====================================================
+  // AUTH
+  // =====================================================
+
+  const [user, setUser] = useState(null);
+  const [loggedIn, setLoggedIn] = useState(false);
+  const [authLoading, setAuthLoading] = useState(true);
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [targetLanguage, setTargetLanguage] = useState("Python");
-const [targetFramework, setTargetFramework] = useState("Pytest");
-
-  // =====================================================
-  // AUTHENTICATION
-  // =====================================================
-
-  /// Restore login session after page refresh.
-  const [token, setToken] = useState(
-  () => localStorage.getItem("access_token") || ""
-);
-
-const [loggedIn, setLoggedIn] = useState(
-  () => !!localStorage.getItem("access_token")
-);
-
   const [loginError, setLoginError] = useState("");
   const [loggingIn, setLoggingIn] = useState(false);
 
-  // Registration
   const [showRegister, setShowRegister] = useState(false);
   const [registerName, setRegisterName] = useState("");
   const [registerEmail, setRegisterEmail] = useState("");
   const [registerPassword, setRegisterPassword] = useState("");
   const [registerError, setRegisterError] = useState("");
-  const [registerSuccess, setRegisterSuccess] = useState("");
   const [registering, setRegistering] = useState(false);
 
   // =====================================================
-  // PROJECT STATE
+  // PROJECT
   // =====================================================
 
   const [projects, setProjects] = useState([]);
-  const [projectsLoading, setProjectsLoading] = useState(false);
+  const [projectId, setProjectId] = useState(null);
 
- const [projectId, setProjectId] = useState(
-  () => localStorage.getItem("current_project_id") || null
-);
-
-const [projectName, setProjectName] = useState(
-  () => localStorage.getItem("current_project_name") || ""
-);
+  const [projectName, setProjectName] = useState("");
   const [projectDescription, setProjectDescription] = useState("");
 
-  const [showCreateProject, setShowCreateProject] = useState(false);
-  const [openingProject, setOpeningProject] = useState(false);
-
+  const [projectLoading, setProjectLoading] = useState(false);
   const [projectError, setProjectError] = useState("");
-  const [creatingProject, setCreatingProject] = useState(false);
+  const [showCreateProject, setShowCreateProject] = useState(false);
 
   // =====================================================
-  // OPENAPI STATE
+  // API
+  // =====================================================
+
+  const [projectApis, setProjectApis] = useState([]);
+
+  const [apiMethod, setApiMethod] = useState("GET");
+  const [apiEndpoint, setApiEndpoint] = useState("");
+  const [apiRequestBody, setApiRequestBody] = useState("");
+
+  const [apiError, setApiError] = useState("");
+  const [apiLoading, setApiLoading] = useState(false);
+
+  // =====================================================
+  // OPENAPI
   // =====================================================
 
   const [selectedFile, setSelectedFile] = useState(null);
+  const [openApiSpec, setOpenApiSpec] = useState(null);
   const [importedApis, setImportedApis] = useState([]);
 
-  const [uploading, setUploading] = useState(false);
-  const [uploadMessage, setUploadMessage] = useState("");
   const [uploadError, setUploadError] = useState("");
+  const [uploading, setUploading] = useState(false);
 
   // =====================================================
-  // TEST CASE STATE
+  // AI GENERATION
   // =====================================================
 
-  const [testCases, setTestCases] = useState([]);
+  const [targetLanguage, setTargetLanguage] = useState("Python");
+  const [targetFramework, setTargetFramework] = useState("Pytest");
+
+  const [generatedCode, setGeneratedCode] = useState("");
+  const [generatedFilename, setGeneratedFilename] = useState("");
+
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState("");
 
-  const getAuthHeaders = () => ({
-    Authorization: `Bearer ${token}`,
-    "Content-Type": "application/json",
-  });
-
   // =====================================================
-  // LOAD PROJECTS AFTER LOGIN
+  // AUTH CHECK
   // =====================================================
 
   useEffect(() => {
-    if (!loggedIn || !token) {
+    async function loadUser() {
+      try {
+        const currentUser = await getCurrentUser();
+
+        if (currentUser) {
+          setUser(currentUser);
+          setLoggedIn(true);
+        }
+      } catch (error) {
+        console.error("User loading error:", error);
+      } finally {
+        setAuthLoading(false);
+      }
+    }
+
+    loadUser();
+  }, []);
+
+  // =====================================================
+  // LOAD PROJECTS
+  // =====================================================
+
+  useEffect(() => {
+    if (!loggedIn) return;
+
+    async function loadProjects() {
+      setProjectLoading(true);
+      setProjectError("");
+
+      try {
+        const data = await getProjects();
+        const projectList = data || [];
+
+        setProjects(projectList);
+
+        if (projectList.length > 0 && !projectId) {
+          setProjectId(projectList[0].id);
+          setProjectName(projectList[0].name || "");
+          setProjectDescription(
+            projectList[0].description || ""
+          );
+        }
+      } catch (error) {
+        console.error("Project loading error:", error);
+        setProjectError(
+          error.message || "Failed to load projects."
+        );
+      } finally {
+        setProjectLoading(false);
+      }
+    }
+
+    loadProjects();
+  }, [loggedIn]);
+
+  // =====================================================
+  // LOAD APIS
+  // =====================================================
+
+  useEffect(() => {
+    if (!projectId) {
+      setProjectApis([]);
       return;
     }
 
-    fetchProjects();
-  }, [loggedIn, token]);
+    async function loadApis() {
+      try {
+        const data = await getProjectApis(projectId);
+        setProjectApis(data || []);
+      } catch (error) {
+        console.error("API loading error:", error);
+      }
+    }
 
-  const fetchProjects = async () => {
-  setProjectsLoading(true);
-  setProjectError("");
+    loadApis();
+  }, [projectId]);
 
-  try {
-    const data = await getProjects();
-
-    setProjects(Array.isArray(data) ? data : []);
-  } catch (error) {
-    console.error("Fetch projects error:", error);
-
-    setProjectError(
-      error.message || "Failed to fetch projects"
-    );
-  } finally {
-    setProjectsLoading(false);
-  }
-};
   // =====================================================
   // LOGIN
   // =====================================================
 
-const handleLogin = async (event) => {
-  event.preventDefault();
+  const handleLogin = async (event) => {
+    event.preventDefault();
 
-  setLoginError("");
-  setLoggingIn(true);
+    setLoginError("");
+    setLoggingIn(true);
 
-  try {
-    const data = await loginUser(email, password);
+    try {
+      const data = await loginUser(email, password);
 
-    const accessToken = data?.session?.access_token;
+      setUser(data.user);
+      setLoggedIn(true);
 
-    if (!accessToken) {
-      throw new Error("Login succeeded but no access token was returned.");
+      setEmail("");
+      setPassword("");
+    } catch (error) {
+      setLoginError(error.message || "Login failed.");
+    } finally {
+      setLoggingIn(false);
     }
+  };
 
-    localStorage.setItem("access_token", accessToken);
-
-    setToken(accessToken);
-    setLoggedIn(true);
-
-    setEmail("");
-    setPassword("");
-
-    setProjectId(null);
-    setProjectName("");
-    setProjectDescription("");
-
-    setImportedApis([]);
-    setTestCases([]);
-  } catch (error) {
-    setLoginError(
-      error.message || "Login failed"
-    );
-  } finally {
-    setLoggingIn(false);
-  }
-};
   // =====================================================
   // REGISTER
   // =====================================================
 
   const handleRegister = async (event) => {
-  event.preventDefault();
+    event.preventDefault();
 
-  setRegisterError("");
-  setRegisterSuccess("");
-  setRegistering(true);
+    setRegisterError("");
+    setRegistering(true);
 
-  try {
-    await registerUser(
-      registerName,
-      registerEmail,
-      registerPassword
-    );
+    try {
+      const data = await registerUser(
+        registerName,
+        registerEmail,
+        registerPassword
+      );
 
-    setRegisterSuccess(
-      "Registration successful! Please check your email to confirm your account."
-    );
+      if (data.user) {
+        setUser(data.user);
+      }
 
-    setRegisterName("");
-    setRegisterEmail("");
-    setRegisterPassword("");
+      setShowRegister(false);
 
-    setShowRegister(false);
+      setRegisterName("");
+      setRegisterEmail("");
+      setRegisterPassword("");
 
-    setEmail("");
-    setPassword("");
-    setLoginError("");
-  } catch (error) {
-    setRegisterError(
-      error.message || "Registration failed"
-    );
-  } finally {
-    setRegistering(false);
-  }
-};
+      alert(
+        "Registration successful. Please check your email if confirmation is required."
+      );
+    } catch (error) {
+      setRegisterError(
+        error.message || "Registration failed."
+      );
+    } finally {
+      setRegistering(false);
+    }
+  };
+
   // =====================================================
   // LOGOUT
   // =====================================================
 
-  const handleLogout = () => {
-    localStorage.removeItem("access_token");
-    localStorage.removeItem("current_project_id");
-    localStorage.removeItem("current_project_name");
-    localStorage.removeItem("current_project_description");
+  const handleLogout = async () => {
+    try {
+      await logoutUser();
 
-    setToken("");
-    setLoggedIn(false);
+      setUser(null);
+      setLoggedIn(false);
+      setProjects([]);
+      setProjectId(null);
+      setProjectApis([]);
 
-    setEmail("");
-    setPassword("");
+      setOpenApiSpec(null);
+      setSelectedFile(null);
+      setImportedApis([]);
 
-    setProjects([]);
-
-    setProjectId(null);
-    setProjectName("");
-    setProjectDescription("");
-
-    setImportedApis([]);
-    setTestCases([]);
-
-    setSelectedFile(null);
-
-    setUploadMessage("");
-    setUploadError("");
-
-    setGenerateError("");
-    setProjectError("");
-
-    setShowCreateProject(false);
-
-    // Reset registration state.
-    setShowRegister(false);
-    setRegisterName("");
-    setRegisterEmail("");
-    setRegisterPassword("");
-    setRegisterError("");
-    setRegisterSuccess("");
+      setGeneratedCode("");
+      setGeneratedFilename("");
+    } catch (error) {
+      console.error("Logout error:", error);
+    }
   };
 
   // =====================================================
   // CREATE PROJECT
   // =====================================================
-  const startNewProject = () => {
-  setProjectError("");
-  setProjectName("");
-  setProjectDescription("");
-  setProjectId(null);
-  setImportedApis([]);
-  setTestCases([]);
-  setShowCreateProject(true);
-};
-  const createProject = async (event) => {
-  event.preventDefault();
 
-  setProjectError("");
-  setCreatingProject(true);
+  const handleCreateProject = async (event) => {
+    event.preventDefault();
 
-  try {
-    const data = await createProjectInSupabase(
-      projectName,
-      projectDescription
-    );
+    if (!projectName.trim()) {
+      setProjectError("Project name is required.");
+      return;
+    }
 
-    localStorage.setItem(
-      "current_project_id",
-      data.id
-    );
-
-    localStorage.setItem(
-      "current_project_name",
-      data.name || ""
-    );
-
-    localStorage.setItem(
-      "current_project_description",
-      data.description || ""
-    );
-
-    setProjectId(data.id);
-    setProjectName(data.name || "");
-    setProjectDescription(data.description || "");
-
-    setImportedApis([]);
-    setTestCases([]);
-
-    setShowCreateProject(false);
-
-    await fetchProjects();
-  } catch (error) {
-    console.error("Create project error:", error);
-
-    setProjectError(
-      error.message || "Failed to create project"
-    );
-  } finally {
-    setCreatingProject(false);
-  }
-};
-  // =====================================================
-  // OPEN PROJECT
-  // =====================================================
-const openProject = async (project) => {
-  setOpeningProject(true);
-  setProjectError("");
-
-  try {
-    localStorage.setItem(
-      "current_project_id",
-      project.id
-    );
-
-    localStorage.setItem(
-      "current_project_name",
-      project.name || ""
-    );
-
-    localStorage.setItem(
-      "current_project_description",
-      project.description || ""
-    );
-
-    setProjectId(project.id);
-    setProjectName(project.name || "");
-    setProjectDescription(project.description || "");
-
-    const apiList = await getProjectApis(project.id);
-
-    setImportedApis(
-      Array.isArray(apiList) ? apiList : []
-    );
-
-    setTestCases([]);
-  } catch (error) {
-    console.error("Open project error:", error);
-
-    setProjectError(
-      error.message || "Failed to open project"
-    );
-  } finally {
-    setOpeningProject(false);
-  }
-};
- 
-  // =====================================================
-  // BACK TO PROJECTS
-  // =====================================================
-
-  const backToProjects = async () => {
-    localStorage.removeItem("current_project_id");
-    localStorage.removeItem("current_project_name");
-    localStorage.removeItem("current_project_description");
-
-    setProjectId(null);
-    setProjectName("");
-    setProjectDescription("");
-
-    setImportedApis([]);
-    setTestCases([]);
-
-    setSelectedFile(null);
-    setUploadMessage("");
-    setUploadError("");
-    setGenerateError("");
+    setProjectLoading(true);
     setProjectError("");
 
-    setShowCreateProject(false);
+    try {
+      const newProject = await createProjectInSupabase(
+        projectName.trim(),
+        projectDescription.trim()
+      );
 
-    await fetchProjects();
+      setProjects((previous) => [
+        newProject,
+        ...previous,
+      ]);
+
+      setProjectId(newProject.id);
+      setProjectApis([]);
+
+      setOpenApiSpec(null);
+      setSelectedFile(null);
+      setImportedApis([]);
+
+      setGeneratedCode("");
+      setGeneratedFilename("");
+
+      setProjectName("");
+      setProjectDescription("");
+      setShowCreateProject(false);
+    } catch (error) {
+      setProjectError(
+        error.message || "Failed to create project."
+      );
+    } finally {
+      setProjectLoading(false);
+    }
   };
 
   // =====================================================
-  // OPENAPI FILE
+  // SELECT PROJECT
+  // =====================================================
+
+  const handleSelectProject = (id) => {
+    const selectedProject = projects.find(
+      (project) => project.id === id
+    );
+
+    setProjectId(id);
+
+    if (selectedProject) {
+      setProjectName(selectedProject.name || "");
+      setProjectDescription(
+        selectedProject.description || ""
+      );
+    }
+
+    setApiError("");
+    setUploadError("");
+    setGenerateError("");
+
+    setOpenApiSpec(null);
+    setSelectedFile(null);
+    setImportedApis([]);
+
+    setGeneratedCode("");
+    setGeneratedFilename("");
+  };
+
+  // =====================================================
+  // CREATE MANUAL API
+  // =====================================================
+
+  const handleCreateApi = async (event) => {
+    event.preventDefault();
+
+    setApiError("");
+
+    if (!projectId) {
+      setApiError("Please select a project first.");
+      return;
+    }
+
+    if (!apiEndpoint.trim()) {
+      setApiError("API endpoint is required.");
+      return;
+    }
+
+    const duplicate = projectApis.some(
+      (api) =>
+        api.method === apiMethod &&
+        api.endpoint === apiEndpoint.trim()
+    );
+
+    if (duplicate) {
+      setApiError(
+        "This API endpoint already exists in the project."
+      );
+      return;
+    }
+
+    setApiLoading(true);
+
+    try {
+      const newApi = await createProjectApi({
+        project_id: projectId,
+        method: apiMethod,
+        endpoint: apiEndpoint.trim(),
+        request_body: apiRequestBody.trim(),
+      });
+
+      setProjectApis((previous) => [
+        ...previous,
+        newApi,
+      ]);
+
+      setApiMethod("GET");
+      setApiEndpoint("");
+      setApiRequestBody("");
+    } catch (error) {
+      setApiError(
+        error.message || "Failed to create API."
+      );
+    } finally {
+      setApiLoading(false);
+    }
+  };
+
+  // =====================================================
+  // FILE
   // =====================================================
 
   const handleFileChange = (event) => {
     const file = event.target.files?.[0];
 
-    setSelectedFile(file || null);
-    setUploadMessage("");
     setUploadError("");
 
-    if (file) {
-      setUploadMessage(`Selected file: ${file.name}`);
+    if (!file) {
+      setSelectedFile(null);
+      return;
     }
+
+    setSelectedFile(file);
   };
-const uploadOpenAPI = async () => {
-  if (!projectId) {
-    setUploadError(
-      "Please create or open a project first."
-    );
-    return;
-  }
 
-  if (!selectedFile) {
-    setUploadError(
-      "Please select an OpenAPI JSON or YAML file."
-    );
-    return;
-  }
+  // =====================================================
+  // PARSE OPENAPI
+  // =====================================================
 
-  setUploading(true);
-  setUploadError("");
-  setUploadMessage(
-    `Processing ${selectedFile.name}...`
-  );
-
-  try {
-    const fileName = selectedFile.name;
-    const fileText = await selectedFile.text();
-
-    let spec;
-
-    if (fileName.toLowerCase().endsWith(".json")) {
-      spec = JSON.parse(fileText);
-    } else if (
-      fileName.toLowerCase().endsWith(".yaml") ||
-      fileName.toLowerCase().endsWith(".yml")
-    ) {
-      spec = yaml.load(fileText);
-    } else {
-      throw new Error(
-        "Unsupported file type. Please upload JSON or YAML."
-      );
-    }
+  const parseOpenApiFile = async (file) => {
+    const text = await file.text();
 
     if (
-      !spec ||
-      typeof spec !== "object" ||
-      !spec.paths
+      file.name.toLowerCase().endsWith(".yaml") ||
+      file.name.toLowerCase().endsWith(".yml")
     ) {
-      throw new Error(
-        "Invalid OpenAPI specification: paths were not found."
-      );
+      return yaml.load(text);
     }
 
-    const apisToInsert = [];
+    return JSON.parse(text);
+  };
 
-    for (const [path, pathItem] of Object.entries(
-      spec.paths
-    )) {
-      if (
-        !pathItem ||
-        typeof pathItem !== "object"
-      ) {
-        continue;
-      }
+  // =====================================================
+  // EXTRACT APIS
+  // =====================================================
 
-      for (const [method, operation] of Object.entries(
-        pathItem
-      )) {
-        const upperMethod = method.toUpperCase();
+  const extractApisFromSpec = (spec) => {
+    const endpoints = [];
 
-        const supportedMethods = [
-          "GET",
-          "POST",
-          "PUT",
-          "PATCH",
-          "DELETE",
-          "OPTIONS",
-          "HEAD",
-        ];
+    if (!spec?.paths) {
+      return endpoints;
+    }
 
+    const methods = [
+      "get",
+      "post",
+      "put",
+      "patch",
+      "delete",
+      "options",
+      "head",
+    ];
+
+    Object.entries(spec.paths).forEach(
+      ([path, pathItem]) => {
         if (
-          !supportedMethods.includes(upperMethod)
+          !pathItem ||
+          typeof pathItem !== "object"
         ) {
-          continue;
+          return;
         }
 
-        let requestBody = "";
+        methods.forEach((method) => {
+          const operation = pathItem[method];
 
-        if (operation?.requestBody) {
-          requestBody = JSON.stringify(
-            operation.requestBody.content?.[
-              "application/json"
-            ]?.schema ||
-              operation.requestBody.content ||
-              operation.requestBody
-          );
-        }
+          if (!operation) return;
 
-        apisToInsert.push({
-          project_id: projectId,
-          method: upperMethod,
-          endpoint: path,
-          request_body: requestBody,
+          let requestBody = "";
+
+          if (operation.requestBody) {
+            const content =
+              operation.requestBody.content || {};
+
+            const jsonContent =
+              content["application/json"];
+
+            if (jsonContent?.schema) {
+              requestBody = JSON.stringify(
+                jsonContent.schema,
+                null,
+                2
+              );
+            }
+          }
+
+          endpoints.push({
+            method: method.toUpperCase(),
+            endpoint: path,
+            request_body: requestBody,
+          });
         });
       }
-    }
+    );
 
-    if (apisToInsert.length === 0) {
-      throw new Error(
-        "No API endpoints were found in the OpenAPI specification."
+    return endpoints;
+  };
+
+  // =====================================================
+  // IMPORT OPENAPI
+  // =====================================================
+
+  const handleImportOpenApi = async () => {
+    setUploadError("");
+
+    if (!projectId) {
+      setUploadError(
+        "Please create or select a project first."
       );
+      return;
     }
 
-    const savedApis = await createProjectApis(
-      apisToInsert
-    );
+    if (!selectedFile) {
+      setUploadError(
+        "Please select an OpenAPI JSON or YAML file."
+      );
+      return;
+    }
 
-    setImportedApis(
-      Array.isArray(savedApis)
-        ? savedApis
-        : []
-    );
+    setUploading(true);
 
-    setSelectedFile(null);
+    try {
+      const spec = await parseOpenApiFile(selectedFile);
 
-    setUploadMessage(
-      `Successfully imported ${savedApis.length} API endpoint(s) from ${fileName}.`
-    );
-  } catch (error) {
-    console.error(
-      "OpenAPI import error:",
-      error
-    );
+      if (!spec?.openapi && !spec?.swagger) {
+        throw new Error(
+          "The uploaded file does not appear to be a valid OpenAPI or Swagger specification."
+        );
+      }
 
-    setUploadError(
-      error.message ||
-        "Failed to import OpenAPI specification."
-    );
-  } finally {
-    setUploading(false);
-  }
-};
+      const extractedApis =
+        extractApisFromSpec(spec);
+
+      if (extractedApis.length === 0) {
+        throw new Error(
+          "No API endpoints were found in the OpenAPI specification."
+        );
+      }
+
+      const uniqueImportedApis = [];
+      const seen = new Set();
+
+      extractedApis.forEach((api) => {
+        const key =
+          `${api.method}:${api.endpoint}`;
+
+        if (!seen.has(key)) {
+          seen.add(key);
+          uniqueImportedApis.push(api);
+        }
+      });
+
+      const existingKeys = new Set(
+        projectApis.map(
+          (api) =>
+            `${api.method}:${api.endpoint}`
+        )
+      );
+
+      const newApis =
+        uniqueImportedApis.filter(
+          (api) =>
+            !existingKeys.has(
+              `${api.method}:${api.endpoint}`
+            )
+        );
+
+      let savedApis = [];
+
+      if (newApis.length > 0) {
+        const apisForDatabase =
+          newApis.map((api) => ({
+            project_id: projectId,
+            method: api.method,
+            endpoint: api.endpoint,
+            request_body:
+              api.request_body || "",
+          }));
+
+        savedApis =
+          await createProjectApis(
+            apisForDatabase
+          );
+      }
+
+      setOpenApiSpec(spec);
+      setImportedApis(uniqueImportedApis);
+
+      if (savedApis.length > 0) {
+        setProjectApis((previous) => [
+          ...previous,
+          ...savedApis,
+        ]);
+      }
+    } catch (error) {
+      console.error(
+        "OpenAPI import error:",
+        error
+      );
+
+      setUploadError(
+        error.message ||
+          "Failed to import OpenAPI specification."
+      );
+    } finally {
+      setUploading(false);
+    }
+  };
+
   // =====================================================
-  // GENERATE TEST CASES
+  // LANGUAGE
   // =====================================================
 
-  const generateTestCases = async () => {
+  const handleLanguageChange = (language) => {
+    setTargetLanguage(language);
+
+    if (language === "Python") {
+      setTargetFramework("Pytest");
+    }
+
+    if (language === "Node.js") {
+      setTargetFramework("Jest");
+    }
+
+    if (language === "Spring Boot") {
+      setTargetFramework("JUnit");
+    }
+
+    setGeneratedCode("");
+    setGeneratedFilename("");
+    setGenerateError("");
+  };
+
+  // =====================================================
+  // GENERATE
+  // =====================================================
+
+  const generateTestCode = async () => {
+    setGenerateError("");
+
     if (!projectId) {
       setGenerateError(
         "Please create or open a project first."
@@ -538,1267 +646,1041 @@ const uploadOpenAPI = async () => {
       return;
     }
 
+    if (!openApiSpec) {
+      setGenerateError(
+        "Please upload an OpenAPI specification first."
+      );
+      return;
+    }
+
     if (importedApis.length === 0) {
       setGenerateError(
-        "Please import at least one API before generating test cases."
+        "No API endpoints are available for generation."
       );
       return;
     }
 
     setGenerating(true);
-    setGenerateError("");
+    setGeneratedCode("");
+    setGeneratedFilename("");
 
     try {
-      const response = await fetch(
-        `${API_BASE_URL}/projects/${projectId}/generate`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
-      );
+      const result =
+        await generateTestsWithAI(
+          openApiSpec,
+          targetLanguage,
+          targetFramework
+        );
 
-      const data = await response.json();
-
-      if (response.status === 401) {
-        handleLogout();
-        return;
-      }
-
-      if (!response.ok) {
+      if (!result?.generatedCode) {
         throw new Error(
-          data.detail || "Failed to generate test cases"
+          "The AI service did not return generated test code."
         );
       }
 
-      setTestCases(
-        Array.isArray(data.test_cases)
-          ? data.test_cases
-          : []
-      );
+      let filename = "generated_tests.txt";
 
-      localStorage.setItem(
-        "current_project_id",
-        projectId
-      );
-      localStorage.setItem(
-        "current_project_name",
-        projectName
-      );
-      localStorage.setItem(
-        "current_project_description",
-        projectDescription
+      if (targetLanguage === "Python") {
+        filename = "test_api.py";
+      }
+
+      if (targetLanguage === "Node.js") {
+        filename = "api.test.js";
+      }
+
+      if (targetLanguage === "Spring Boot") {
+        filename = "ApiTest.java";
+      }
+
+      setGeneratedCode(result.generatedCode);
+      setGeneratedFilename(
+        result.filename || filename
       );
     } catch (error) {
-      setGenerateError(error.message);
+      console.error(
+        "Generation error:",
+        error
+      );
+
+      setGenerateError(
+        error.message ||
+          "Failed to generate test code."
+      );
     } finally {
       setGenerating(false);
     }
   };
 
   // =====================================================
-  // EXPORT HELPERS
+  // DOWNLOAD
   // =====================================================
 
-  const downloadExport = async (type, filename) => {
-    try {
-      if (!token) {
-        throw new Error(
-          "You are not authenticated. Please login again."
-        );
+  const handleDownload = () => {
+    if (!generatedCode) return;
+
+    const blob = new Blob(
+      [generatedCode],
+      {
+        type: "text/plain;charset=utf-8",
       }
-
-      if (!projectId) {
-        throw new Error(
-          "Please open a project first."
-        );
-      }
-
-      const response = await fetch(
-        `${API_BASE_URL}/projects/${projectId}/export/${type}`,
-        {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
-      );
-
-      if (response.status === 401) {
-        handleLogout();
-        return;
-      }
-
-      if (!response.ok) {
-        const data = await response
-          .json()
-          .catch(() => ({}));
-
-        throw new Error(
-          data.detail ||
-            `Failed to export ${type}`
-        );
-      }
-
-      const blob = await response.blob();
-
-      const url = window.URL.createObjectURL(blob);
-
-      const link = document.createElement("a");
-
-      link.href = url;
-      link.download = filename;
-
-      document.body.appendChild(link);
-
-      link.click();
-
-      link.remove();
-
-      window.URL.revokeObjectURL(url);
-    } catch (error) {
-      console.error("Export error:", error);
-      alert(error.message);
-    }
-  };
-
-  const exportExcel = () => {
-    downloadExport(
-      "excel",
-      `project_${projectId}_test_cases.xlsx`
     );
-  };
 
-  const exportPDF = () => {
-    downloadExport(
-      "pdf",
-      `project_${projectId}_test_cases.pdf`
-    );
-  };
+    const url = URL.createObjectURL(blob);
 
-  const exportPostman = () => {
-    downloadExport(
-      "postman",
-      `project_${projectId}_postman.json`
-    );
+    const link = document.createElement("a");
+
+    link.href = url;
+    link.download =
+      generatedFilename ||
+      "generated_tests.txt";
+
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    URL.revokeObjectURL(url);
   };
 
   // =====================================================
-  // LOGIN / REGISTER PAGE
+  // LOADING
   // =====================================================
 
-  if (!loggedIn || !token) {
-    // ===================================================
-    // REGISTER PAGE
-    // ===================================================
-
-    if (showRegister) {
-      return (
-        <div className="login-page">
-          <div className="login-background"></div>
-
-          <div className="login-card">
-            <div className="logo">
-              <div className="logo-icon">AI</div>
-
-              <span>API Test Generator</span>
-            </div>
-
-            <div className="login-heading">
-              <h1>Create account</h1>
-
-              <p>
-                Register to start generating intelligent
-                API test cases with AI.
-              </p>
-            </div>
-
-            <form onSubmit={handleRegister}>
-              <div className="form-group">
-                <label htmlFor="registerName">
-                  Full Name
-                </label>
-
-                <input
-                  id="registerName"
-                  type="text"
-                  value={registerName}
-                  onChange={(event) =>
-                    setRegisterName(event.target.value)
-                  }
-                  placeholder="Enter your name"
-                  required
-                />
-              </div>
-
-              <div className="form-group">
-                <label htmlFor="registerEmail">
-                  Email address
-                </label>
-
-                <input
-                  id="registerEmail"
-                  type="email"
-                  value={registerEmail}
-                  onChange={(event) =>
-                    setRegisterEmail(event.target.value)
-                  }
-                  placeholder="Enter your email"
-                  required
-                />
-              </div>
-
-              <div className="form-group">
-                <label htmlFor="registerPassword">
-                  Password
-                </label>
-
-                <input
-                  id="registerPassword"
-                  type="password"
-                  value={registerPassword}
-                  onChange={(event) =>
-                    setRegisterPassword(event.target.value)
-                  }
-                  placeholder="Create a password"
-                  required
-                  minLength={6}
-                />
-              </div>
-
-              {registerError && (
-                <div className="error-message">
-                  {registerError}
-                </div>
-              )}
-
-              <button
-                type="submit"
-                className="primary-button"
-                disabled={registering}
-              >
-                {registering
-                  ? "Creating account..."
-                  : "Create Account →"}
-              </button>
-            </form>
-
-            <div
-              style={{
-                textAlign: "center",
-                marginTop: "20px",
-              }}
-            >
-              <span>
-                Already have an account?{" "}
-              </span>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setShowRegister(false);
-                  setRegisterError("");
-                  setRegisterSuccess("");
-                }}
-                style={{
-                  background: "none",
-                  border: "none",
-                  padding: 0,
-                  color: "#7c3aed",
-                  fontWeight: "600",
-                  cursor: "pointer",
-                  fontSize: "inherit",
-                }}
-              >
-                Login
-              </button>
-            </div>
-
-            <div className="login-footer">
-              AI-powered REST API testing platform
-            </div>
-          </div>
-        </div>
-      );
-    }
-
-    // ===================================================
-    // LOGIN PAGE
-    // ===================================================
-
+  if (authLoading) {
     return (
-      <div className="login-page">
-        <div className="login-background"></div>
-
-        <div className="login-card">
-          <div className="logo">
-            <div className="logo-icon">AI</div>
-
-            <span>API Test Generator</span>
-          </div>
-
-          <div className="login-heading">
-            <h1>Welcome back</h1>
-
-            <p>
-              Generate intelligent API test cases with AI.
-              Login to continue to your workspace.
-            </p>
-          </div>
-
-          {registerSuccess && (
-            <div
-              style={{
-                marginBottom: "16px",
-                padding: "12px 14px",
-                borderRadius: "8px",
-                background: "#dcfce7",
-                color: "#166534",
-                fontSize: "14px",
-              }}
-            >
-              ✓ {registerSuccess}
-            </div>
-          )}
-
-          <form onSubmit={handleLogin}>
-            <div className="form-group">
-              <label htmlFor="email">
-                Email address
-              </label>
-
-              <input
-                id="email"
-                type="email"
-                value={email}
-                onChange={(event) =>
-                  setEmail(event.target.value)
-                }
-                placeholder="Enter your email"
-                required
-              />
-            </div>
-
-            <div className="form-group">
-              <label htmlFor="password">
-                Password
-              </label>
-
-              <input
-                id="password"
-                type="password"
-                value={password}
-                onChange={(event) =>
-                  setPassword(event.target.value)
-                }
-                placeholder="Enter your password"
-                required
-              />
-            </div>
-
-            {loginError && (
-              <div className="error-message">
-                {loginError}
-              </div>
-            )}
-
-            <button
-              type="submit"
-              className="primary-button"
-              disabled={loggingIn}
-            >
-              {loggingIn
-                ? "Signing in..."
-                : "Login →"}
-            </button>
-          </form>
-
-          <div
-            style={{
-              textAlign: "center",
-              marginTop: "20px",
-            }}
-          >
-            <span>
-              Don't have an account?{" "}
-            </span>
-
-            <button
-              type="button"
-              onClick={() => {
-                setShowRegister(true);
-                setLoginError("");
-                setRegisterError("");
-                setRegisterSuccess("");
-              }}
-              style={{
-                background: "none",
-                border: "none",
-                padding: 0,
-                color: "#7c3aed",
-                fontWeight: "600",
-                cursor: "pointer",
-                fontSize: "inherit",
-              }}
-            >
-              Register
-            </button>
-          </div>
-
-          <div className="login-footer">
-            AI-powered REST API testing platform
-          </div>
+      <div className="app">
+        <div className="loading-screen">
+          <h2>Loading...</h2>
         </div>
       </div>
     );
   }
 
   // =====================================================
-  // PROJECT LIST
+  // LOGIN / REGISTER
   // =====================================================
 
-  if (!projectId && !showCreateProject) {
+  if (!loggedIn) {
     return (
       <div className="app">
-        <div className="dashboard">
-          <main className="main-content">
-            <div className="top-header">
-              <div>
-                <div className="eyebrow">
-                  WORKSPACE
+        <div className="auth-container">
+          <div className="auth-card">
+            {!showRegister ? (
+              <>
+                <div className="auth-logo">
+                  ✦
                 </div>
 
                 <h1>
-                  My <span>Projects</span>
+                  AI API Test Generator
                 </h1>
 
-                <p className="header-description">
-                  Select an existing project or create a
-                  new project to begin API testing.
+                <p>
+                  Generate intelligent API test
+                  code from OpenAPI specifications.
                 </p>
-              </div>
 
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "12px",
-                }}
-              >
-                <div className="header-status">
-                  <div className="pulse"></div>
-                  Connected
-                </div>
-
-                <button
-                  onClick={handleLogout}
-                  style={{
-                    padding: "10px 18px",
-                    border: "none",
-                    borderRadius: "8px",
-                    background: "#dc2626",
-                    color: "white",
-                    cursor: "pointer",
-                    fontWeight: "600",
-                  }}
+                <form
+                  onSubmit={handleLogin}
+                  className="auth-form"
                 >
-                  Logout
-                </button>
-              </div>
-            </div>
-
-            <button
-              className="gradient-button"
-              onClick={startNewProject}
-            >
-              <span>＋</span>
-              Create New Project
-            </button>
-
-            {projectError && (
-              <div className="error-message">
-                {projectError}
-              </div>
-            )}
-
-            <div style={{ marginTop: "30px" }}>
-              {projectsLoading ? (
-                <div className="content-card">
-                  <p>Loading your projects...</p>
-                </div>
-              ) : projects.length === 0 ? (
-                <div className="content-card">
-                  <div className="section-heading">
-                    <div className="section-icon">
-                      📁
-                    </div>
-
-                    <div>
-                      <h2>No projects yet</h2>
-
-                      <p>
-                        Create your first project to start
-                        generating API test cases.
-                      </p>
-                    </div>
-                  </div>
-
-                  <button
-                    className="gradient-button"
-                    onClick={startNewProject}
-                  >
-                    <span>＋</span>
-                    Create Your First Project
-                  </button>
-                </div>
-              ) : (
-                <div className="test-grid">
-                  {projects.map((project) => (
-                    <div
-                      className="test-card"
-                      key={project.id}
-                    >
-                      <div className="test-card-top">
-                        <span className="type-badge">
-                          PROJECT
-                        </span>
-
-                        <span className="test-number">
-                          #{project.id}
-                        </span>
-                      </div>
-
-                      <h3>{project.name}</h3>
-
-                      <p className="test-description">
-                        {project.description ||
-                          "No description provided."}
-                      </p>
-
-                      <button
-                        className="gradient-button"
-                        onClick={() =>
-                          openProject(project)
-                        }
-                        disabled={openingProject}
-                      >
-                        {openingProject
-                          ? "Opening..."
-                          : "Open Project →"}
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </main>
-        </div>
-      </div>
-    );
-  }
-
-  // =====================================================
-  // CREATE PROJECT
-  // =====================================================
-
-  if (showCreateProject && !projectId) {
-    return (
-      <div className="app">
-        <div className="dashboard">
-          <main className="main-content">
-            <div className="top-header">
-              <div>
-                <div className="eyebrow">
-                  NEW PROJECT
-                </div>
-
-                <h1>
-                  Create <span>Project</span>
-                </h1>
-
-                <p className="header-description">
-                  Set up a workspace for your REST API
-                  testing.
-                </p>
-              </div>
-
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "12px",
-                }}
-              >
-                <button
-                  className="gradient-button"
-                  onClick={backToProjects}
-                >
-                  ← My Projects
-                </button>
-
-                <button
-                  onClick={handleLogout}
-                  style={{
-                    padding: "10px 18px",
-                    border: "none",
-                    borderRadius: "8px",
-                    background: "#dc2626",
-                    color: "white",
-                    cursor: "pointer",
-                    fontWeight: "600",
-                  }}
-                >
-                  Logout
-                </button>
-              </div>
-            </div>
-
-            <div className="content-card">
-              <div className="section-heading">
-                <div className="section-icon">
-                  🚀
-                </div>
-
-                <div>
-                  <h2>Project Details</h2>
-
-                  <p>
-                    Enter the basic information for your
-                    project.
-                  </p>
-                </div>
-              </div>
-
-              <form
-                className="project-form"
-                onSubmit={createProject}
-              >
-                <div className="form-group">
-                  <label htmlFor="projectName">
-                    Project Name
-                  </label>
+                  <label>Email</label>
 
                   <input
-                    id="projectName"
-                    value={projectName}
+                    type="email"
+                    value={email}
                     onChange={(event) =>
-                      setProjectName(event.target.value)
+                      setEmail(event.target.value)
                     }
-                    placeholder="Example: User Management API"
+                    placeholder="Enter your email"
                     required
                   />
+
+                  <label>Password</label>
+
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={(event) =>
+                      setPassword(event.target.value)
+                    }
+                    placeholder="Enter your password"
+                    required
+                  />
+
+                  {loginError && (
+                    <div className="error-message">
+                      {loginError}
+                    </div>
+                  )}
+
+                  <button
+                    type="submit"
+                    disabled={loggingIn}
+                  >
+                    {loggingIn
+                      ? "Signing in..."
+                      : "Sign In →"}
+                  </button>
+                </form>
+
+                <p className="auth-switch">
+                  Don't have an account?
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowRegister(true);
+                      setLoginError("");
+                    }}
+                  >
+                    Create account
+                  </button>
+                </p>
+              </>
+            ) : (
+              <>
+                <div className="auth-logo">
+                  ✦
                 </div>
 
-                <div className="form-group">
-                  <label htmlFor="projectDescription">
-                    Description
-                  </label>
+                <h1>Create Account</h1>
 
-                  <textarea
-                    id="projectDescription"
-                    value={projectDescription}
+                <p>
+                  Start generating API tests
+                  with AI.
+                </p>
+
+                <form
+                  onSubmit={handleRegister}
+                  className="auth-form"
+                >
+                  <label>Name</label>
+
+                  <input
+                    type="text"
+                    value={registerName}
                     onChange={(event) =>
-                      setProjectDescription(
+                      setRegisterName(
                         event.target.value
                       )
                     }
-                    placeholder="Describe your API testing project"
+                    placeholder="Your name"
+                    required
                   />
-                </div>
 
-                {projectError && (
-                  <div className="error-message">
-                    {projectError}
-                  </div>
-                )}
+                  <label>Email</label>
 
-                <button
-                  type="submit"
-                  className="gradient-button"
-                  disabled={creatingProject}
-                >
-                  {creatingProject
-                    ? "Creating Project..."
-                    : "Create Project →"}
-                </button>
-              </form>
-            </div>
-          </main>
+                  <input
+                    type="email"
+                    value={registerEmail}
+                    onChange={(event) =>
+                      setRegisterEmail(
+                        event.target.value
+                      )
+                    }
+                    placeholder="Your email"
+                    required
+                  />
+
+                  <label>Password</label>
+
+                  <input
+                    type="password"
+                    value={registerPassword}
+                    onChange={(event) =>
+                      setRegisterPassword(
+                        event.target.value
+                      )
+                    }
+                    placeholder="Minimum 8 characters"
+                    minLength={8}
+                    required
+                  />
+
+                  {registerError && (
+                    <div className="error-message">
+                      {registerError}
+                    </div>
+                  )}
+
+                  <button
+                    type="submit"
+                    disabled={registering}
+                  >
+                    {registering
+                      ? "Creating..."
+                      : "Create Account →"}
+                  </button>
+                </form>
+
+                <p className="auth-switch">
+                  Already have an account?
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowRegister(false);
+                      setRegisterError("");
+                    }}
+                  >
+                    Sign in
+                  </button>
+                </p>
+              </>
+            )}
+          </div>
         </div>
       </div>
     );
   }
 
   // =====================================================
-  // PROJECT WORKSPACE
+  // MAIN DASHBOARD
   // =====================================================
 
   return (
-    <div className="app">
-      <div className="dashboard">
-        <aside className="sidebar">
-          <div className="brand">
-            <div className="brand-icon">
-              AI
+    <div className="app dashboard-app">
+
+      {/* SIDEBAR */}
+
+      <aside className="sidebar">
+        <div className="sidebar-brand">
+          <div className="brand-icon">✦</div>
+
+          <div>
+            <strong>API Test AI</strong>
+            <span>Generator</span>
+          </div>
+        </div>
+
+        <nav className="sidebar-nav">
+          <button className="sidebar-link active">
+            <span>⌂</span>
+            Dashboard
+          </button>
+
+          <button
+            className="sidebar-link"
+            onClick={() => {
+              document
+                .getElementById("projects-section")
+                ?.scrollIntoView({
+                  behavior: "smooth",
+                });
+            }}
+          >
+            <span>▣</span>
+            Projects
+          </button>
+
+          <button
+            className="sidebar-link"
+            onClick={() => {
+              document
+                .getElementById("apis-section")
+                ?.scrollIntoView({
+                  behavior: "smooth",
+                });
+            }}
+          >
+            <span>⌘</span>
+            API Endpoints
+          </button>
+
+          <button
+            className="sidebar-link"
+            onClick={() => {
+              document
+                .getElementById("generation-section")
+                ?.scrollIntoView({
+                  behavior: "smooth",
+                });
+            }}
+          >
+            <span>✧</span>
+            AI Generator
+          </button>
+        </nav>
+
+        <div className="sidebar-bottom">
+          <div className="sidebar-user">
+            <div className="user-avatar">
+              {(user?.email || "U")
+                .charAt(0)
+                .toUpperCase()}
             </div>
 
             <div>
-              <h2>API Generator</h2>
+              <strong>
+                {user?.user_metadata?.name ||
+                  "User"}
+              </strong>
 
-              <span>AI Testing Platform</span>
+              <span>
+                {user?.email}
+              </span>
             </div>
           </div>
 
-          <nav className="sidebar-nav">
-            <div className="nav-item active">
-              <span>▦</span>
-              Workspace
-            </div>
+          <button
+            className="sidebar-logout"
+            onClick={handleLogout}
+          >
+            Logout
+          </button>
+        </div>
+      </aside>
 
-            <div
-              className="nav-item"
-              onClick={backToProjects}
-            >
-              <span>▤</span>
-              My Projects
-            </div>
-          </nav>
+      {/* MAIN */}
 
-          <div className="sidebar-footer">
-            <div className="online-dot"></div>
-            Backend connected
+      <main className="dashboard-main">
+
+        {/* TOP BAR */}
+
+        <header className="dashboard-header">
+          <div>
+            <span className="eyebrow">
+              WORKSPACE
+            </span>
+
+            <h1>
+              API Test Generator
+            </h1>
+
+            <p>
+              Turn your OpenAPI specification
+              into executable test code.
+            </p>
           </div>
-        </aside>
 
-        <main className="main-content">
-          <div className="top-header">
+          <div className="header-project">
+            <span>Current project</span>
+
+            <strong>
+              {projectName ||
+                "No project selected"}
+            </strong>
+          </div>
+        </header>
+
+        {/* STATS */}
+
+        <section className="stats-grid">
+          <div className="stat-card">
+            <div className="stat-icon">▣</div>
+
             <div>
-              <div className="eyebrow">
-                API TESTING WORKSPACE
-              </div>
+              <span>Projects</span>
+              <strong>{projects.length}</strong>
+            </div>
+          </div>
 
-              <h1>
-                {projectName || "API Testing"}{" "}
-                <span>Workspace</span>
-              </h1>
+          <div className="stat-card">
+            <div className="stat-icon">⌘</div>
 
-              <p className="header-description">
-                {projectDescription ||
-                  "AI-powered REST API test case generation and analysis."}
+            <div>
+              <span>API Endpoints</span>
+              <strong>
+                {projectApis.length}
+              </strong>
+            </div>
+          </div>
+
+          <div className="stat-card">
+            <div className="stat-icon">✦</div>
+
+            <div>
+              <span>Imported</span>
+              <strong>
+                {importedApis.length}
+              </strong>
+            </div>
+          </div>
+
+          <div className="stat-card">
+            <div className="stat-icon">✓</div>
+
+            <div>
+              <span>Generated</span>
+              <strong>
+                {generatedCode ? "1" : "0"}
+              </strong>
+            </div>
+          </div>
+        </section>
+
+        {/* PROJECTS */}
+
+        <section
+          id="projects-section"
+          className="workspace-card"
+        >
+          <div className="workspace-card-header">
+            <div>
+              <span className="step-number">
+                PROJECT
+              </span>
+
+              <h2>
+                Your Projects
+              </h2>
+
+              <p>
+                Select a project or create a
+                new workspace.
               </p>
             </div>
 
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "12px",
+            <button
+              className="primary-button"
+              onClick={() => {
+                setShowCreateProject(
+                  !showCreateProject
+                );
+                setProjectError("");
               }}
             >
-              <div className="header-status">
-                <div className="pulse"></div>
-                Project #{projectId}
-              </div>
+              {showCreateProject
+                ? "Cancel"
+                : "+ New Project"}
+            </button>
+          </div>
+
+          {showCreateProject && (
+            <form
+              onSubmit={handleCreateProject}
+              className="create-project-panel"
+            >
+              <input
+                type="text"
+                value={projectName}
+                onChange={(event) => {
+                  setProjectName(
+                    event.target.value
+                  );
+                  setProjectError("");
+                }}
+                placeholder="Project name"
+                required
+              />
+
+              <textarea
+                value={projectDescription}
+                onChange={(event) =>
+                  setProjectDescription(
+                    event.target.value
+                  )
+                }
+                placeholder="Project description"
+              />
 
               <button
-                onClick={handleLogout}
-                style={{
-                  padding: "10px 18px",
-                  border: "none",
-                  borderRadius: "8px",
-                  background: "#dc2626",
-                  color: "white",
-                  cursor: "pointer",
-                  fontWeight: "600",
-                }}
+                className="primary-button"
+                type="submit"
+                disabled={projectLoading}
               >
-                Logout
+                {projectLoading
+                  ? "Creating..."
+                  : "Create Project"}
               </button>
+            </form>
+          )}
+
+          {projectError && (
+            <div className="error-message">
+              {projectError}
             </div>
-          </div>
+          )}
 
-          <div className="stats-grid">
-            <div className="stat-card">
-              <div className="stat-icon purple">
-                📁
-              </div>
-
-              <div>
-                <p>PROJECT ID</p>
-                <h3>#{projectId}</h3>
-              </div>
-            </div>
-
-            <div className="stat-card">
-              <div className="stat-icon blue">
-                🔌
-              </div>
-
-              <div>
-                <p>API ENDPOINTS</p>
-                <h3>{importedApis.length}</h3>
-              </div>
-            </div>
-
-            <div className="stat-card">
-              <div className="stat-icon pink">
-                🧪
-              </div>
-
-              <div>
-                <p>TEST CASES</p>
-                <h3>{testCases.length}</h3>
-              </div>
-            </div>
-          </div>
-
-          <div className="workflow-card">
-            <div className="workflow-title">
-              <h2>Testing Workflow</h2>
-            </div>
-
-            <div className="workflow">
-              <div
-                className={`workflow-step ${
-                  importedApis.length > 0
-                    ? "completed"
-                    : ""
-                }`}
+          <div className="project-grid">
+            {projects.map((project) => (
+              <button
+                key={project.id}
+                type="button"
+                className={
+                  project.id === projectId
+                    ? "project-card selected"
+                    : "project-card"
+                }
+                onClick={() =>
+                  handleSelectProject(
+                    project.id
+                  )
+                }
               >
-                <div className="step-number">
-                  1
+                <div className="project-card-icon">
+                  {project.name
+                    ?.charAt(0)
+                    ?.toUpperCase() || "P"}
                 </div>
 
                 <div>
-                  <h4>Import API</h4>
-                  <p>
-                    Upload OpenAPI specification
-                  </p>
-                </div>
-              </div>
+                  <strong>
+                    {project.name}
+                  </strong>
 
-              <div className="workflow-line"></div>
-
-              <div
-                className={`workflow-step ${
-                  testCases.length > 0
-                    ? "completed"
-                    : ""
-                }`}
-              >
-                <div className="step-number">
-                  2
+                  <span>
+                    {project.description ||
+                      "API testing workspace"}
+                  </span>
                 </div>
 
-                <div>
-                  <h4>Generate Tests</h4>
-                  <p>
-                    AI creates test scenarios
-                  </p>
-                </div>
-              </div>
-
-              <div className="workflow-line"></div>
-
-              <div
-                className={`workflow-step ${
-                  testCases.length > 0
-                    ? "completed"
-                    : ""
-                }`}
-              >
-                <div className="step-number">
-                  3
-                </div>
-
-                <div>
-                  <h4>Review Results</h4>
-                  <p>
-                    Inspect generated test cases
-                  </p>
-                </div>
-              </div>
-            </div>
+                {project.id === projectId && (
+                  <span className="selected-badge">
+                    Active
+                  </span>
+                )}
+              </button>
+            ))}
           </div>
 
-          <section className="content-card">
-            <div className="section-heading">
-              <div className="section-icon">
-                📤
+          {projects.length === 0 &&
+            !projectLoading && (
+              <div className="empty-state">
+                <span>+</span>
+                <strong>
+                  Create your first project
+                </strong>
+                <p>
+                  Start by creating a workspace
+                  for your API tests.
+                </p>
+              </div>
+            )}
+        </section>
+
+        {/* API ENDPOINTS */}
+
+        {projectId && (
+          <section
+            id="apis-section"
+            className="workspace-card"
+          >
+            <div className="workflow-heading">
+              <div className="workflow-step-badge">
+                01
               </div>
 
               <div>
+                <span className="eyebrow">
+                  API SETUP
+                </span>
+
                 <h2>
-                  Upload OpenAPI / Swagger
+                  API Endpoints
                 </h2>
 
                 <p>
-                  Upload a JSON or YAML specification
-                  to import your REST API endpoints.
+                  Add endpoints manually or
+                  import them from OpenAPI.
                 </p>
               </div>
             </div>
 
-            <div className="file-upload">
+            <div className="endpoint-toolbar">
+              <select
+                value={apiMethod}
+                onChange={(event) => {
+                  setApiMethod(
+                    event.target.value
+                  );
+                  setApiError("");
+                }}
+              >
+                <option value="GET">GET</option>
+                <option value="POST">POST</option>
+                <option value="PUT">PUT</option>
+                <option value="PATCH">
+                  PATCH
+                </option>
+                <option value="DELETE">
+                  DELETE
+                </option>
+              </select>
+
               <input
-                type="file"
-                accept=".json,.yaml,.yml"
-                onChange={handleFileChange}
+                value={apiEndpoint}
+                onChange={(event) => {
+                  setApiEndpoint(
+                    event.target.value
+                  );
+                  setApiError("");
+                }}
+                placeholder="/users"
               />
 
-              <div className="upload-visual">
+              <input
+                value={apiRequestBody}
+                onChange={(event) =>
+                  setApiRequestBody(
+                    event.target.value
+                  )
+                }
+                placeholder="Request body (optional)"
+              />
+
+              <button
+                className="secondary-button"
+                onClick={handleCreateApi}
+                disabled={apiLoading}
+              >
+                {apiLoading
+                  ? "Adding..."
+                  : "Add API"}
+              </button>
+            </div>
+
+            {apiError && (
+              <div className="error-message">
+                {apiError}
+              </div>
+            )}
+
+            <div className="endpoint-list">
+              {projectApis.map((api) => (
+                <div
+                  key={api.id}
+                  className="endpoint-row"
+                >
+                  <span
+                    className={`method-badge method-${api.method.toLowerCase()}`}
+                  >
+                    {api.method}
+                  </span>
+
+                  <span className="endpoint-path">
+                    {api.endpoint}
+                  </span>
+                </div>
+              ))}
+
+              {projectApis.length === 0 && (
+                <div className="empty-inline">
+                  No API endpoints yet.
+                </div>
+              )}
+            </div>
+          </section>
+        )}
+
+        {/* OPENAPI IMPORT */}
+
+        {projectId && (
+          <section className="workflow-layout">
+
+            <div className="workflow-number">
+              02
+            </div>
+
+            <div className="workflow-content">
+              <div className="workflow-heading">
+                <div>
+                  <span className="eyebrow">
+                    OPENAPI
+                  </span>
+
+                  <h2>
+                    Import Specification
+                  </h2>
+
+                  <p>
+                    Upload your JSON or YAML
+                    specification and let the
+                    generator analyze your APIs.
+                  </p>
+                </div>
+              </div>
+
+              <div className="upload-card">
                 <div className="upload-icon">
                   ↑
                 </div>
 
                 <h3>
-                  {selectedFile
-                    ? selectedFile.name
-                    : "Drop your OpenAPI file here"}
+                  Upload OpenAPI file
                 </h3>
 
                 <p>
-                  Supports .json, .yaml and .yml
-                  files
+                  Supported formats: JSON,
+                  YAML, and YML
                 </p>
+
+                <label className="file-button">
+                  Choose File
+
+                  <input
+                    type="file"
+                    accept=".json,.yaml,.yml"
+                    onChange={handleFileChange}
+                  />
+                </label>
+
+                {selectedFile && (
+                  <div className="selected-file">
+                    <span>✓</span>
+
+                    <strong>
+                      {selectedFile.name}
+                    </strong>
+                  </div>
+                )}
+
+                <button
+                  className="primary-button"
+                  type="button"
+                  onClick={handleImportOpenApi}
+                  disabled={
+                    uploading ||
+                    !selectedFile
+                  }
+                >
+                  {uploading
+                    ? "Importing..."
+                    : "Import OpenAPI →"}
+                </button>
               </div>
+
+              {uploadError && (
+                <div className="error-message">
+                  {uploadError}
+                </div>
+              )}
+
+              {importedApis.length > 0 && (
+                <div className="import-result">
+                  <div className="import-result-header">
+                    <div>
+                      <span className="eyebrow">
+                        DETECTED
+                      </span>
+
+                      <h3>
+                        {importedApis.length} API
+                        endpoints found
+                      </h3>
+                    </div>
+
+                    <span className="count-badge">
+                      {importedApis.length}
+                    </span>
+                  </div>
+
+                  <div className="endpoint-list">
+                    {importedApis.map(
+                      (api, index) => (
+                        <div
+                          key={`${api.method}-${api.endpoint}-${index}`}
+                          className="endpoint-row"
+                        >
+                          <span
+                            className={`method-badge method-${api.method.toLowerCase()}`}
+                          >
+                            {api.method}
+                          </span>
+
+                          <span className="endpoint-path">
+                            {api.endpoint}
+                          </span>
+                        </div>
+                      )
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          </section>
+        )}
+
+        {/* GENERATION */}
+
+        {projectId && openApiSpec && (
+          <section
+            id="generation-section"
+            className="generation-workspace"
+          >
+            <div className="workflow-number">
+              03
             </div>
 
-            {selectedFile && (
-              <button
-                className="gradient-button"
-                onClick={uploadOpenAPI}
-                disabled={uploading}
-              >
-                {uploading
-                  ? "Uploading..."
-                  : "Upload & Import →"}
-              </button>
-            )}
+            <div className="workflow-content">
 
-            {uploading && (
-              <div className="upload-message">
-                ⏳ Uploading and processing your
-                OpenAPI file...
+              <div className="generation-top">
+                <div>
+                  <span className="eyebrow">
+                    AI GENERATION
+                  </span>
+
+                  <h2>
+                    Generate Test Code
+                  </h2>
+
+                  <p>
+                    Choose your target stack and
+                    generate a complete test file.
+                  </p>
+                </div>
+
+                <div className="ai-status">
+                  <span className="status-dot"></span>
+                  AI Ready
+                </div>
               </div>
-            )}
 
-            {uploadMessage && !uploading && (
-              <div className="upload-message">
-                ✓ {uploadMessage}
-              </div>
-            )}
+              <div className="generation-options">
+                <div className="option-card">
+                  <span>
+                    Target Language
+                  </span>
 
-            {uploadError && (
-              <div className="error-message">
-                ✕ {uploadError}
-              </div>
-            )}
-          </section>
+                  <select
+                    value={targetLanguage}
+                    onChange={(event) =>
+                      handleLanguageChange(
+                        event.target.value
+                      )
+                    }
+                  >
+                    <option value="Python">
+                      Python
+                    </option>
 
-          <section className="content-card">
-            <div className="api-card-header">
-              <div>
-                <h2>
-                  Imported API Endpoints
-                </h2>
+                    <option value="Node.js">
+                      Node.js
+                    </option>
 
-                <p>
-                  Endpoints imported from your
-                  OpenAPI specification.
-                </p>
+                    <option value="Spring Boot">
+                      Spring Boot
+                    </option>
+                  </select>
+                </div>
+
+                <div className="option-card">
+                  <span>
+                    Testing Framework
+                  </span>
+
+                  <select
+                    value={targetFramework}
+                    onChange={(event) => {
+                      setTargetFramework(
+                        event.target.value
+                      );
+
+                      setGeneratedCode("");
+                      setGeneratedFilename("");
+                      setGenerateError("");
+                    }}
+                  >
+                    {targetLanguage ===
+                      "Python" && (
+                      <>
+                        <option value="Pytest">
+                          Pytest
+                        </option>
+
+                        <option value="Unittest">
+                          Unittest
+                        </option>
+                      </>
+                    )}
+
+                    {targetLanguage ===
+                      "Node.js" && (
+                      <>
+                        <option value="Jest">
+                          Jest
+                        </option>
+
+                        <option value="Mocha">
+                          Mocha
+                        </option>
+                      </>
+                    )}
+
+                    {targetLanguage ===
+                      "Spring Boot" && (
+                      <>
+                        <option value="JUnit">
+                          JUnit
+                        </option>
+
+                        <option value="Mockito">
+                          Mockito
+                        </option>
+                      </>
+                    )}
+                  </select>
+                </div>
               </div>
 
               <button
                 className="generate-button"
-                onClick={generateTestCases}
+                type="button"
+                onClick={generateTestCode}
                 disabled={
                   generating ||
                   importedApis.length === 0
                 }
               >
+                <span>✦</span>
+
                 {generating
-                  ? "Generating..."
-                  : "Generate AI Tests →"}
+                  ? "Generating AI Test Code..."
+                  : "Generate AI Test Code"}
               </button>
-            </div>
 
-            {importedApis.length === 0 ? (
-              <p>No APIs imported yet.</p>
-            ) : (
-              <div className="api-list">
-                {importedApis.map((api) => (
-                  <div
-                    className="api-row"
-                    key={api.id}
-                  >
-                    <span
-                      className={`method ${String(
-                        api.method
-                      ).toLowerCase()}`}
-                    >
-                      {api.method}
-                    </span>
-
-                    <span className="endpoint">
-                      {api.endpoint}
-                    </span>
-
-                    <span className="api-status">
-                      Imported
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
-
-          {generating && (
-            <section className="content-card generating-card">
-              <div className="ai-loader">
-                <div className="loader-ring"></div>
-
-                <div className="loader-center">
-                  AI
+              {generateError && (
+                <div className="error-message">
+                  {generateError}
                 </div>
-              </div>
+              )}
 
-              <div>
-                <h2>
-                  AI is generating test cases
-                </h2>
+              {generatedCode && (
+                <div className="generated-code-section">
+                  <div className="generated-code-header">
+                    <div>
+                      <span className="eyebrow">
+                        GENERATED FILE
+                      </span>
 
-                <p>
-                  Analyzing your API endpoints and
-                  creating functional, negative,
-                  boundary and security scenarios...
-                </p>
-              </div>
-            </section>
-          )}
+                      <h3>
+                        {generatedFilename}
+                      </h3>
+                    </div>
 
-          {generateError && (
-            <div className="error-message">
-              ✕ {generateError}
-            </div>
-          )}
+                    <button
+                      className="secondary-button"
+                      onClick={handleDownload}
+                    >
+                      ↓ Download
+                    </button>
+                  </div>
 
-          <section className="content-card">
-            <div className="tests-header">
-              <div>
-                <h2>
-                  Generated Test Cases
-                </h2>
+                  <div className="code-window">
+                    <div className="code-window-bar">
+                      <span></span>
+                      <span></span>
+                      <span></span>
 
-                <p>
-                  AI-generated scenarios for your
-                  API endpoints.
-                </p>
-              </div>
+                      <label>
+                        {generatedFilename}
+                      </label>
+                    </div>
 
-              <div className="tests-count">
-                {testCases.length}
-              </div>
-            </div>
+                    <pre className="code-output">
+                      <code>
+                        {generatedCode}
+                      </code>
+                    </pre>
+                  </div>
+                </div>
+              )}
 
-            {testCases.length === 0 ? (
-              <p>
-                No generated test cases yet.
-              </p>
-            ) : (
-              <div className="test-grid">
-                {testCases.map(
-                  (testCase, index) => {
-                    const status =
-                      testCase.execution_status ||
-                      "NOT RUN";
-
-                    const statusUpper =
-                      String(status).toUpperCase();
-
-                    const type = String(
-                      testCase.test_type || ""
-                    )
-                      .toLowerCase()
-                      .replace(/\s+/g, "-");
-
-                    return (
-                      <div
-                        className="test-card"
-                        key={
-                          testCase.id || index
-                        }
-                      >
-                        <div className="test-card-top">
-                          <span
-                            className={`type-badge ${type}`}
-                          >
-                            {testCase.test_type ||
-                              "TEST"}
-                          </span>
-
-                          <span className="test-number">
-                            #{index + 1}
-                          </span>
-                        </div>
-
-                        <h3>
-                          {testCase.title ||
-                            "Untitled Test Case"}
-                        </h3>
-
-                        <div className="test-meta">
-                          <span
-                            className={`method ${String(
-                              testCase.method
-                            ).toLowerCase()}`}
-                          >
-                            {testCase.method}
-                          </span>
-
-                          <span>
-                            {testCase.endpoint}
-                          </span>
-                        </div>
-
-                        {testCase.description && (
-                          <p className="test-description">
-                            {testCase.description}
-                          </p>
-                        )}
-
-                        <div className="expected-result">
-                          <span>
-                            Expected Result
-                          </span>
-
-                          <p>
-                            {testCase.expected_result ||
-                              "Not specified"}
-                          </p>
-                        </div>
-
-                        {testCase.expected_status_code && (
-                          <div className="expected-result">
-                            <span>
-                              Expected Status Code
-                            </span>
-
-                            <p>
-                              {
-                                testCase.expected_status_code
-                              }
-                            </p>
-                          </div>
-                        )}
-
-                        <div className="expected-result">
-                          <span>
-                            Execution Status
-                          </span>
-
-                          <p>{statusUpper}</p>
-                        </div>
-
-                        {testCase.actual_result && (
-                          <div className="expected-result">
-                            <span>
-                              Actual Result
-                            </span>
-
-                            <p>
-                              {testCase.actual_result}
-                            </p>
-                          </div>
-                        )}
-
-                        {testCase.test_code && (
-                          <div className="expected-result">
-                            <span>
-                              Executable Test Code
-                            </span>
-
-                            <pre
-                              style={{
-                                marginTop: "10px",
-                                padding: "15px",
-                                background:
-                                  "#080b14",
-                                borderRadius:
-                                  "10px",
-                                overflowX:
-                                  "auto",
-                                color:
-                                  "#dbeafe",
-                                fontSize:
-                                  "12px",
-                                lineHeight:
-                                  "1.5",
-                                whiteSpace:
-                                  "pre-wrap",
-                              }}
-                            >
-                              {testCase.test_code}
-                            </pre>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  }
-                )}
-              </div>
-            )}
-          </section>
-
-          <section className="content-card">
-            <div className="tests-header">
-              <div>
-                <h2>
-                  Export Results
-                </h2>
-
-                <p>
-                  Download your generated test
-                  cases.
-                </p>
-              </div>
-            </div>
-
-            <div className="export-buttons">
-              <button
-                className="export-btn excel-btn"
-                onClick={exportExcel}
-                disabled={
-                  testCases.length === 0
-                }
-              >
-                Export Excel
-              </button>
-
-              <button
-                className="export-btn pdf-btn"
-                onClick={exportPDF}
-                disabled={
-                  testCases.length === 0
-                }
-              >
-                Export PDF
-              </button>
-
-              <button
-                className="export-btn postman-btn"
-                onClick={exportPostman}
-                disabled={
-                  testCases.length === 0
-                }
-              >
-                Export Postman
-              </button>
             </div>
           </section>
-        </main>
-      </div>
+        )}
+
+      </main>
     </div>
   );
 }
