@@ -13,3 +13,5 @@ app.db
 .idea/
 
 *.log
+node_modules/
+frontend/.env
