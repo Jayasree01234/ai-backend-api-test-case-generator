@@ -1,10 +1,10 @@
 import { useState } from "react";
 
 function GenerationHistory({
-  generations,
+  generations = [],
   projectId,
-  projects,
-  loading,
+  projects = [],
+  loading = false,
 }) {
   const [selectedGeneration, setSelectedGeneration] =
     useState(null);
@@ -14,35 +14,48 @@ function GenerationHistory({
       String(project.id) === String(projectId)
   );
 
+  // Support both snake_case and camelCase field names.
+  const getCode = (generation) =>
+    generation?.generated_code ??
+    generation?.generatedCode ??
+    generation?.code ??
+    "";
+
+  const getFilename = (generation) =>
+    generation?.generated_filename ||
+    generation?.generatedFilename ||
+    "generated_tests.txt";
+
   const handleDownload = (generation) => {
-    const blob = new Blob(
-      [generation.generated_code || ""],
-      {
-        type: "text/plain;charset=utf-8",
-      }
-    );
+    if (!generation) return;
+
+    const code = getCode(generation);
+
+    if (!code) {
+      alert("No saved code was found for this generation.");
+      return;
+    }
+
+    const blob = new Blob([code], {
+      type: "text/plain;charset=utf-8",
+    });
 
     const url = URL.createObjectURL(blob);
-
     const link = document.createElement("a");
 
     link.href = url;
-
-    link.download =
-      generation.generated_filename ||
-      "generated_tests.txt";
+    link.download = getFilename(generation);
 
     document.body.appendChild(link);
-
     link.click();
-
     document.body.removeChild(link);
 
-    URL.revokeObjectURL(url);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
   return (
     <div className="page-content">
+      {/* PAGE HEADER */}
       <div className="page-header">
         <div>
           <h1>Generation History</h1>
@@ -54,6 +67,7 @@ function GenerationHistory({
         </div>
       </div>
 
+      {/* HISTORY LIST */}
       <div className="dashboard-card">
         <div className="card-header">
           <div>
@@ -63,9 +77,7 @@ function GenerationHistory({
                 : "Generation History"}
             </h2>
 
-            <p>
-              Previously generated test-code files.
-            </p>
+            <p>Previously generated test-code files.</p>
           </div>
         </div>
 
@@ -79,36 +91,41 @@ function GenerationHistory({
 
             <p>
               Generate your first API test file
-              from the AI Generator.
+              from the Test Generator.
             </p>
           </div>
         ) : (
           <div className="generation-list">
-            {generations.map((generation) => (
+            {generations.map((generation, index) => (
               <div
                 className="generation-card"
-                key={generation.id}
+                key={
+                  generation.id ||
+                  `${getFilename(generation)}-${index}`
+                }
               >
                 <div>
-                  <h3>
-                    {generation.generated_filename}
-                  </h3>
+                  <h3>{getFilename(generation)}</h3>
 
                   <p>
                     OpenAPI:{" "}
                     {generation.openapi_filename ||
+                      generation.openapiFilename ||
                       "OpenAPI specification"}
                   </p>
 
                   <p>
-                    {generation.language} /{" "}
-                    {generation.framework}
+                    {generation.language || "Unknown language"}
+                    {" / "}
+                    {generation.framework || "Unknown framework"}
                   </p>
 
                   <small>
-                    {generation.created_at
+                    {generation.created_at ||
+                    generation.createdAt
                       ? new Date(
-                          generation.created_at
+                          generation.created_at ||
+                            generation.createdAt
                         ).toLocaleString()
                       : ""}
                   </small>
@@ -116,17 +133,17 @@ function GenerationHistory({
 
                 <div className="generation-actions">
                   <button
+                    type="button"
                     className="secondary-button"
                     onClick={() =>
-                      setSelectedGeneration(
-                        generation
-                      )
+                      setSelectedGeneration(generation)
                     }
                   >
                     View Code
                   </button>
 
                   <button
+                    type="button"
                     className="secondary-button"
                     onClick={() =>
                       handleDownload(generation)
@@ -141,46 +158,136 @@ function GenerationHistory({
         )}
       </div>
 
+      {/* CODE PREVIEW POPUP */}
       {selectedGeneration && (
-        <div className="dashboard-card">
-          <div className="card-header">
-            <div>
-              <h2>
-                {selectedGeneration.generated_filename}
-              </h2>
+        <div
+          role="presentation"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              setSelectedGeneration(null);
+            }
+          }}
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 9999,
+            backgroundColor: "rgba(0, 0, 0, 0.7)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "20px",
+          }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-label="Generated test code"
+            style={{
+              background: "#ffffff",
+              color: "#111827",
+              width: "100%",
+              maxWidth: "1000px",
+              maxHeight: "90vh",
+              borderRadius: "12px",
+              padding: "24px",
+              display: "flex",
+              flexDirection: "column",
+              gap: "16px",
+              boxShadow: "0 20px 60px rgba(0,0,0,0.3)",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "flex-start",
+                gap: "16px",
+                flexWrap: "wrap",
+              }}
+            >
+              <div>
+                <h2
+                  style={{
+                    margin: "0 0 8px",
+                    overflowWrap: "anywhere",
+                  }}
+                >
+                  {getFilename(selectedGeneration)}
+                </h2>
 
-              <p>
-                {selectedGeneration.language} /{" "}
-                {selectedGeneration.framework}
-              </p>
+                <p style={{ margin: 0, color: "#4b5563" }}>
+                  {selectedGeneration.language || "Unknown language"}
+                  {" / "}
+                  {selectedGeneration.framework || "Unknown framework"}
+                </p>
+              </div>
+
+              <div
+                className="generation-actions"
+                style={{
+                  display: "flex",
+                  gap: "8px",
+                  flexWrap: "wrap",
+                }}
+              >
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() =>
+                    handleDownload(selectedGeneration)
+                  }
+                >
+                  Download
+                </button>
+
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() =>
+                    setSelectedGeneration(null)
+                  }
+                >
+                  Close
+                </button>
+              </div>
             </div>
 
-            <div className="generation-actions">
-              <button
-                className="secondary-button"
-                onClick={() =>
-                  handleDownload(selectedGeneration)
-                }
+            {getCode(selectedGeneration) ? (
+              <pre
+                style={{
+                  margin: 0,
+                  padding: "20px",
+                  borderRadius: "8px",
+                  background: "#111827",
+                  color: "#f9fafb",
+                  overflow: "auto",
+                  maxHeight: "65vh",
+                  whiteSpace: "pre-wrap",
+                  overflowWrap: "anywhere",
+                  fontSize: "13px",
+                  lineHeight: 1.65,
+                  textAlign: "left",
+                }}
               >
-                Download
-              </button>
-
-              <button
-                className="secondary-button"
-                onClick={() =>
-                  setSelectedGeneration(null)
-                }
+                <code>{getCode(selectedGeneration)}</code>
+              </pre>
+            ) : (
+              <div
+                style={{
+                  padding: "24px",
+                  borderRadius: "8px",
+                  background: "#f3f4f6",
+                }}
               >
-                Close
-              </button>
-            </div>
-          </div>
+                <h3>Code is unavailable</h3>
 
-          <pre className="code-window">
-            <code>
-              {selectedGeneration.generated_code}
-            </code>
-          </pre>
+                <p>
+                  This history entry contains no saved test code.
+                  Generate a new test file and save it to history.
+                </p>
+              </div>
+            )}
+          </section>
         </div>
       )}
     </div>
