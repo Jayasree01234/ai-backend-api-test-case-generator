@@ -12,21 +12,21 @@ import {
   saveGeneration,
   getProjectGenerations,
 } from "./services/generationService";
-import "./App.css";
 import {
   registerUser,
   loginUser,
   logoutUser,
   getCurrentUser,
 } from "./services/authService";
-
 import {
   getProjects,
-  createProject as createProjectInSupabase,
+  createProject,
   getProjectApis,
   createProjectApi,
   createProjectApis,
 } from "./services/projectService";
+
+import "./App.css";
 
 function App() {
   // =====================================================
@@ -36,7 +36,7 @@ function App() {
   const [activePage, setActivePage] = useState("dashboard");
 
   // =====================================================
-  // AUTH
+  // LOCAL AUTHENTICATION
   // =====================================================
 
   const [user, setUser] = useState(null);
@@ -56,7 +56,7 @@ function App() {
   const [registering, setRegistering] = useState(false);
 
   // =====================================================
-  // PROJECT
+  // PROJECTS
   // =====================================================
 
   const [projects, setProjects] = useState([]);
@@ -70,7 +70,7 @@ function App() {
   const [showCreateProject, setShowCreateProject] = useState(false);
 
   // =====================================================
-  // API
+  // API ENDPOINTS
   // =====================================================
 
   const [projectApis, setProjectApis] = useState([]);
@@ -83,7 +83,7 @@ function App() {
   const [apiLoading, setApiLoading] = useState(false);
 
   // =====================================================
-  // OPENAPI
+  // OPENAPI UPLOAD
   // =====================================================
 
   const [selectedFile, setSelectedFile] = useState(null);
@@ -94,7 +94,7 @@ function App() {
   const [uploading, setUploading] = useState(false);
 
   // =====================================================
-  // AI GENERATION
+  // TEST-CODE GENERATION
   // =====================================================
 
   const [targetLanguage, setTargetLanguage] = useState("Python");
@@ -104,13 +104,13 @@ function App() {
   const [generatedFilename, setGeneratedFilename] = useState("");
 
   const [generations, setGenerations] = useState([]);
-const [generationLoading, setGenerationLoading] = useState(false);
+  const [generationLoading, setGenerationLoading] = useState(false);
 
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState("");
 
   // =====================================================
-  // AUTH CHECK
+  // CHECK LOCAL SESSION
   // =====================================================
 
   useEffect(() => {
@@ -123,7 +123,7 @@ const [generationLoading, setGenerationLoading] = useState(false);
           setLoggedIn(true);
         }
       } catch (error) {
-        console.error("User loading error:", error);
+        console.error("Local session loading error:", error);
       } finally {
         setAuthLoading(false);
       }
@@ -137,7 +137,10 @@ const [generationLoading, setGenerationLoading] = useState(false);
   // =====================================================
 
   useEffect(() => {
-    if (!loggedIn) return;
+    if (!loggedIn) {
+      setProjects([]);
+      return;
+    }
 
     async function loadProjects() {
       setProjectLoading(true);
@@ -158,7 +161,6 @@ const [generationLoading, setGenerationLoading] = useState(false);
         }
       } catch (error) {
         console.error("Project loading error:", error);
-
         setProjectError(
           error.message || "Failed to load projects."
         );
@@ -171,11 +173,11 @@ const [generationLoading, setGenerationLoading] = useState(false);
   }, [loggedIn]);
 
   // =====================================================
-  // LOAD APIS
+  // LOAD PROJECT API ENDPOINTS
   // =====================================================
 
   useEffect(() => {
-    if (!projectId) {
+    if (!projectId || !loggedIn) {
       setProjectApis([]);
       return;
     }
@@ -185,42 +187,41 @@ const [generationLoading, setGenerationLoading] = useState(false);
         const data = await getProjectApis(projectId);
         setProjectApis(data || []);
       } catch (error) {
-        console.error("API loading error:", error);
+        console.error("API endpoint loading error:", error);
       }
     }
 
     loadApis();
-  }, [projectId]);
-
+  }, [projectId, loggedIn]);
 
   // =====================================================
-// LOAD GENERATION HISTORY
-// =====================================================
+  // LOAD GENERATION HISTORY
+  // =====================================================
 
-useEffect(() => {
-  if (!projectId) {
-    setGenerations([]);
-    return;
-  }
-
-  async function loadGenerations() {
-    setGenerationLoading(true);
-
-    try {
-      const data = await getProjectGenerations(projectId);
-      setGenerations(data || []);
-    } catch (error) {
-      console.error(
-        "Generation history loading error:",
-        error
-      );
-    } finally {
-      setGenerationLoading(false);
+  useEffect(() => {
+    if (!projectId || !loggedIn) {
+      setGenerations([]);
+      return;
     }
-  }
 
-  loadGenerations();
-}, [projectId]);
+    async function loadGenerations() {
+      setGenerationLoading(true);
+
+      try {
+        const data = await getProjectGenerations(projectId);
+        setGenerations(data || []);
+      } catch (error) {
+        console.error(
+          "Generation history loading error:",
+          error
+        );
+      } finally {
+        setGenerationLoading(false);
+      }
+    }
+
+    loadGenerations();
+  }, [projectId, loggedIn]);
 
   // =====================================================
   // LOGIN
@@ -240,6 +241,7 @@ useEffect(() => {
 
       setEmail("");
       setPassword("");
+      setActivePage("dashboard");
     } catch (error) {
       setLoginError(error.message || "Login failed.");
     } finally {
@@ -258,24 +260,20 @@ useEffect(() => {
     setRegistering(true);
 
     try {
-      const data = await registerUser(
+      await registerUser(
         registerName,
         registerEmail,
         registerPassword
       );
 
-      if (data.user) {
-        setUser(data.user);
-      }
-
       setShowRegister(false);
-
       setRegisterName("");
       setRegisterEmail("");
       setRegisterPassword("");
+      setEmail(registerEmail.trim());
 
       alert(
-        "Registration successful. Please check your email if confirmation is required."
+        "Account created in this browser. Please sign in with your new account."
       );
     } catch (error) {
       setRegisterError(
@@ -300,6 +298,10 @@ useEffect(() => {
       setProjects([]);
       setProjectId(null);
       setProjectApis([]);
+      setGenerations([]);
+
+      setProjectName("");
+      setProjectDescription("");
 
       setOpenApiSpec(null);
       setSelectedFile(null);
@@ -307,6 +309,9 @@ useEffect(() => {
 
       setGeneratedCode("");
       setGeneratedFilename("");
+
+      setEmail("");
+      setPassword("");
 
       setActivePage("dashboard");
     } catch (error) {
@@ -330,7 +335,7 @@ useEffect(() => {
     setProjectError("");
 
     try {
-      const newProject = await createProjectInSupabase(
+      const newProject = await createProject(
         projectName.trim(),
         projectDescription.trim()
       );
@@ -342,6 +347,7 @@ useEffect(() => {
 
       setProjectId(newProject.id);
       setProjectApis([]);
+      setGenerations([]);
 
       setOpenApiSpec(null);
       setSelectedFile(null);
@@ -375,7 +381,6 @@ useEffect(() => {
 
     if (selectedProject) {
       setProjectName(selectedProject.name || "");
-
       setProjectDescription(
         selectedProject.description || ""
       );
@@ -394,7 +399,7 @@ useEffect(() => {
   };
 
   // =====================================================
-  // CREATE MANUAL API
+  // CREATE MANUAL API ENDPOINT
   // =====================================================
 
   const handleCreateApi = async (event) => {
@@ -412,10 +417,15 @@ useEffect(() => {
       return;
     }
 
+    const normalizedEndpoint = apiEndpoint.trim().startsWith("/")
+      ? apiEndpoint.trim()
+      : `/${apiEndpoint.trim()}`;
+
     const duplicate = projectApis.some(
       (api) =>
-        api.method === apiMethod &&
-        api.endpoint === apiEndpoint.trim()
+        String(api.method).toUpperCase() ===
+          apiMethod.toUpperCase() &&
+        api.endpoint === normalizedEndpoint
     );
 
     if (duplicate) {
@@ -431,7 +441,7 @@ useEffect(() => {
       const newApi = await createProjectApi({
         project_id: projectId,
         method: apiMethod,
-        endpoint: apiEndpoint.trim(),
+        endpoint: normalizedEndpoint,
         request_body: apiRequestBody.trim(),
       });
 
@@ -445,7 +455,7 @@ useEffect(() => {
       setApiRequestBody("");
     } catch (error) {
       setApiError(
-        error.message || "Failed to create API."
+        error.message || "Failed to create API endpoint."
       );
     } finally {
       setApiLoading(false);
@@ -453,32 +463,32 @@ useEffect(() => {
   };
 
   // =====================================================
-  // FILE
+  // SELECT OPENAPI FILE
   // =====================================================
 
   const handleFileChange = (event) => {
-    const file = event.target.files?.[0];
+    const file = event.target.files?.[0] || null;
 
     setUploadError("");
+    setSelectedFile(file);
 
     if (!file) {
-      setSelectedFile(null);
-      return;
+      setOpenApiSpec(null);
+      setImportedApis([]);
     }
-
-    setSelectedFile(file);
   };
 
   // =====================================================
-  // PARSE OPENAPI
+  // PARSE JSON OR YAML
   // =====================================================
 
   const parseOpenApiFile = async (file) => {
     const text = await file.text();
+    const filename = file.name.toLowerCase();
 
     if (
-      file.name.toLowerCase().endsWith(".yaml") ||
-      file.name.toLowerCase().endsWith(".yml")
+      filename.endsWith(".yaml") ||
+      filename.endsWith(".yml")
     ) {
       return yaml.load(text);
     }
@@ -487,13 +497,13 @@ useEffect(() => {
   };
 
   // =====================================================
-  // EXTRACT APIS
+  // EXTRACT API ENDPOINTS
   // =====================================================
 
   const extractApisFromSpec = (spec) => {
     const endpoints = [];
 
-    if (!spec?.paths) {
+    if (!spec?.paths || typeof spec.paths !== "object") {
       return endpoints;
     }
 
@@ -507,52 +517,44 @@ useEffect(() => {
       "head",
     ];
 
-    Object.entries(spec.paths).forEach(
-      ([path, pathItem]) => {
-        if (
-          !pathItem ||
-          typeof pathItem !== "object"
-        ) {
+    Object.entries(spec.paths).forEach(([path, pathItem]) => {
+      if (!pathItem || typeof pathItem !== "object") {
+        return;
+      }
+
+      methods.forEach((method) => {
+        const operation = pathItem[method];
+
+        if (!operation || typeof operation !== "object") {
           return;
         }
 
-        methods.forEach((method) => {
-          const operation = pathItem[method];
+        let requestBody = "";
 
-          if (!operation) return;
+        const jsonSchema =
+          operation.requestBody?.content?.["application/json"]?.schema;
 
-          let requestBody = "";
+        if (jsonSchema) {
+          requestBody = JSON.stringify(
+            jsonSchema,
+            null,
+            2
+          );
+        }
 
-          if (operation.requestBody) {
-            const content =
-              operation.requestBody.content || {};
-
-            const jsonContent =
-              content["application/json"];
-
-            if (jsonContent?.schema) {
-              requestBody = JSON.stringify(
-                jsonContent.schema,
-                null,
-                2
-              );
-            }
-          }
-
-          endpoints.push({
-            method: method.toUpperCase(),
-            endpoint: path,
-            request_body: requestBody,
-          });
+        endpoints.push({
+          method: method.toUpperCase(),
+          endpoint: path,
+          request_body: requestBody,
         });
-      }
-    );
+      });
+    });
 
     return endpoints;
   };
 
   // =====================================================
-  // IMPORT OPENAPI
+  // IMPORT OPENAPI SPECIFICATION
   // =====================================================
 
   const handleImportOpenApi = async () => {
@@ -577,14 +579,13 @@ useEffect(() => {
     try {
       const spec = await parseOpenApiFile(selectedFile);
 
-      if (!spec?.openapi && !spec?.swagger) {
+      if (!spec || (!spec.openapi && !spec.swagger)) {
         throw new Error(
           "The uploaded file does not appear to be a valid OpenAPI or Swagger specification."
         );
       }
 
-      const extractedApis =
-        extractApisFromSpec(spec);
+      const extractedApis = extractApisFromSpec(spec);
 
       if (extractedApis.length === 0) {
         throw new Error(
@@ -596,8 +597,7 @@ useEffect(() => {
       const seen = new Set();
 
       extractedApis.forEach((api) => {
-        const key =
-          `${api.method}:${api.endpoint}`;
+        const key = `${api.method}:${api.endpoint}`;
 
         if (!seen.has(key)) {
           seen.add(key);
@@ -608,34 +608,28 @@ useEffect(() => {
       const existingKeys = new Set(
         projectApis.map(
           (api) =>
-            `${api.method}:${api.endpoint}`
+            `${String(api.method).toUpperCase()}:${api.endpoint}`
         )
       );
 
-      const newApis =
-        uniqueImportedApis.filter(
-          (api) =>
-            !existingKeys.has(
-              `${api.method}:${api.endpoint}`
-            )
-        );
+      const newApis = uniqueImportedApis.filter(
+        (api) =>
+          !existingKeys.has(
+            `${api.method}:${api.endpoint}`
+          )
+      );
 
       let savedApis = [];
 
       if (newApis.length > 0) {
-        const apisForDatabase =
-          newApis.map((api) => ({
-            project_id: projectId,
-            method: api.method,
-            endpoint: api.endpoint,
-            request_body:
-              api.request_body || "",
-          }));
+        const apisForStorage = newApis.map((api) => ({
+          project_id: projectId,
+          method: api.method,
+          endpoint: api.endpoint,
+          request_body: api.request_body || "",
+        }));
 
-        savedApis =
-          await createProjectApis(
-            apisForDatabase
-          );
+        savedApis = await createProjectApis(apisForStorage);
       }
 
       setOpenApiSpec(spec);
@@ -648,10 +642,7 @@ useEffect(() => {
         ]);
       }
     } catch (error) {
-      console.error(
-        "OpenAPI import error:",
-        error
-      );
+      console.error("OpenAPI import error:", error);
 
       setUploadError(
         error.message ||
@@ -663,7 +654,7 @@ useEffect(() => {
   };
 
   // =====================================================
-  // LANGUAGE
+  // CHANGE TARGET LANGUAGE AND FRAMEWORK
   // =====================================================
 
   const handleLanguageChange = (language) => {
@@ -687,133 +678,118 @@ useEffect(() => {
   };
 
   // =====================================================
-  // GENERATE
+  // GENERATE TEST CODE IN THE BROWSER
   // =====================================================
 
   const generateTestCode = async () => {
-  setGenerateError("");
+    setGenerateError("");
 
-  if (!projectId) {
-    setGenerateError(
-      "Please create or open a project first."
-    );
-    return;
-  }
-
-  if (!openApiSpec) {
-    setGenerateError(
-      "Please upload an OpenAPI specification first."
-    );
-    return;
-  }
-
-  if (importedApis.length === 0) {
-    setGenerateError(
-      "No API endpoints are available for generation."
-    );
-    return;
-  }
-
-  setGenerating(true);
-  setGeneratedCode("");
-  setGeneratedFilename("");
-
-  try {
-    const result = await generateTestsWithAI(
-      openApiSpec,
-      targetLanguage,
-      targetFramework
-    );
-
-    if (!result?.generatedCode) {
-      throw new Error(
-        "The AI service did not return generated test code."
+    if (!projectId) {
+      setGenerateError(
+        "Please create or open a project first."
       );
+      return;
     }
 
-    let filename = "generated_tests.txt";
-
-    if (targetLanguage === "Python") {
-      filename = "test_api.py";
+    if (!openApiSpec) {
+      setGenerateError(
+        "Please upload an OpenAPI specification first."
+      );
+      return;
     }
 
-    if (targetLanguage === "Node.js") {
-      filename = "api.test.js";
+    if (importedApis.length === 0) {
+      setGenerateError(
+        "No API endpoints are available for generation."
+      );
+      return;
     }
 
-    if (targetLanguage === "Spring Boot") {
-      filename = "ApiTest.java";
-    }
+    setGenerating(true);
+    setGeneratedCode("");
+    setGeneratedFilename("");
 
-    const finalFilename =
-      result.filename || filename;
+    try {
+      const result = await generateTestsWithAI(
+        openApiSpec,
+        targetLanguage,
+        targetFramework
+      );
 
-    // Show generated result in the UI
-    setGeneratedCode(result.generatedCode);
-    setGeneratedFilename(finalFilename);
-
-    // Save generation history in Supabase
-    await saveGeneration({
-      projectId,
-      openapiFilename:
-        selectedFile?.name || "OpenAPI specification",
-      language: targetLanguage,
-      framework: targetFramework,
-      generatedFilename: finalFilename,
-      generatedCode: result.generatedCode,
-    });
-
-  } catch (error) {
-    console.error(
-      "Generation error:",
-      error
-    );
-
-    setGenerateError(
-      error.message ||
-        "Failed to generate test code."
-    );
-  } finally {
-    setGenerating(false);
-  }
-};
-  // =====================================================
-  // DOWNLOAD
-  // =====================================================
-
-  const handleDownload = () => {
-    if (!generatedCode) return;
-
-    const blob = new Blob(
-      [generatedCode],
-      {
-        type: "text/plain;charset=utf-8",
+      if (!result?.generatedCode) {
+        throw new Error(
+          "The test generator did not return any code."
+        );
       }
-    );
 
-    const url =
-      URL.createObjectURL(blob);
+      const fallbackFilenames = {
+        Python: "test_api.py",
+        "Node.js": "api.test.js",
+        "Spring Boot": "ApiTest.java",
+      };
 
-    const link =
-      document.createElement("a");
+      const finalFilename =
+        result.filename ||
+        fallbackFilenames[targetLanguage] ||
+        "generated_tests.txt";
 
-    link.href = url;
+      setGeneratedCode(result.generatedCode);
+      setGeneratedFilename(finalFilename);
 
-    link.download =
-      generatedFilename ||
-      "generated_tests.txt";
+      const savedGeneration = await saveGeneration({
+        projectId,
+        openapiFilename:
+          selectedFile?.name || "OpenAPI specification",
+        language: targetLanguage,
+        framework: targetFramework,
+        generatedFilename: finalFilename,
+        generatedCode: result.generatedCode,
+      });
 
-    document.body.appendChild(link);
+      setGenerations((previous) => [
+        savedGeneration,
+        ...previous,
+      ]);
+    } catch (error) {
+      console.error("Test-code generation error:", error);
 
-    link.click();
-
-    document.body.removeChild(link);
-
-    URL.revokeObjectURL(url);
+      setGenerateError(
+        error.message || "Failed to generate test code."
+      );
+    } finally {
+      setGenerating(false);
+    }
   };
 
   // =====================================================
-  // LOADING
+  // DOWNLOAD GENERATED TEST FILE
+  // =====================================================
+
+  const handleDownload = () => {
+    if (!generatedCode) {
+      return;
+    }
+
+    const blob = new Blob([generatedCode], {
+      type: "text/plain;charset=utf-8",
+    });
+
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+
+    link.href = url;
+    link.download =
+      generatedFilename || "generated_tests.txt";
+
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  // =====================================================
+  // LOADING SCREEN
   // =====================================================
 
   if (authLoading) {
@@ -827,7 +803,7 @@ useEffect(() => {
   }
 
   // =====================================================
-  // LOGIN / REGISTER
+  // LOGIN AND REGISTER SCREENS
   // =====================================================
 
   if (!loggedIn) {
@@ -835,20 +811,15 @@ useEffect(() => {
       <div className="app">
         <div className="auth-container">
           <div className="auth-card">
-
             {!showRegister ? (
               <>
-                <div className="auth-logo">
-                  ✦
-                </div>
+                <div className="auth-logo">✦</div>
 
-                <h1>
-                  AI API Test Generator
-                </h1>
+                <h1>API Test AI Generator</h1>
 
                 <p>
-                  Generate intelligent API test
-                  code from OpenAPI specifications.
+                  Generate test-code files from OpenAPI
+                  specifications.
                 </p>
 
                 <form
@@ -864,6 +835,7 @@ useEffect(() => {
                       setEmail(event.target.value)
                     }
                     placeholder="Enter your email"
+                    autoComplete="email"
                     required
                   />
 
@@ -876,6 +848,7 @@ useEffect(() => {
                       setPassword(event.target.value)
                     }
                     placeholder="Enter your password"
+                    autoComplete="current-password"
                     required
                   />
 
@@ -896,7 +869,7 @@ useEffect(() => {
                 </form>
 
                 <p className="auth-switch">
-                  Don't have an account?
+                  Don't have an account?{" "}
 
                   <button
                     type="button"
@@ -911,15 +884,12 @@ useEffect(() => {
               </>
             ) : (
               <>
-                <div className="auth-logo">
-                  ✦
-                </div>
+                <div className="auth-logo">✦</div>
 
                 <h1>Create Account</h1>
 
                 <p>
-                  Start generating API tests
-                  with AI.
+                  Create a local account for this browser.
                 </p>
 
                 <form
@@ -932,11 +902,10 @@ useEffect(() => {
                     type="text"
                     value={registerName}
                     onChange={(event) =>
-                      setRegisterName(
-                        event.target.value
-                      )
+                      setRegisterName(event.target.value)
                     }
                     placeholder="Your name"
+                    autoComplete="name"
                     required
                   />
 
@@ -946,11 +915,10 @@ useEffect(() => {
                     type="email"
                     value={registerEmail}
                     onChange={(event) =>
-                      setRegisterEmail(
-                        event.target.value
-                      )
+                      setRegisterEmail(event.target.value)
                     }
                     placeholder="Your email"
+                    autoComplete="email"
                     required
                   />
 
@@ -960,11 +928,10 @@ useEffect(() => {
                     type="password"
                     value={registerPassword}
                     onChange={(event) =>
-                      setRegisterPassword(
-                        event.target.value
-                      )
+                      setRegisterPassword(event.target.value)
                     }
                     placeholder="Minimum 8 characters"
+                    autoComplete="new-password"
                     minLength={8}
                     required
                   />
@@ -986,7 +953,7 @@ useEffect(() => {
                 </form>
 
                 <p className="auth-switch">
-                  Already have an account?
+                  Already have an account?{" "}
 
                   <button
                     type="button"
@@ -1000,7 +967,6 @@ useEffect(() => {
                 </p>
               </>
             )}
-
           </div>
         </div>
       </div>
@@ -1013,15 +979,11 @@ useEffect(() => {
 
   return (
     <div className="app dashboard-app">
-
       {/* SIDEBAR */}
 
       <aside className="sidebar">
-
         <div className="sidebar-brand">
-          <div className="brand-icon">
-            ✦
-          </div>
+          <div className="brand-icon">✦</div>
 
           <div>
             <strong>API Test AI</strong>
@@ -1030,82 +992,54 @@ useEffect(() => {
         </div>
 
         <nav className="sidebar-nav">
-
           <button
             className={`sidebar-link ${
-              activePage === "dashboard"
-                ? "active"
-                : ""
+              activePage === "dashboard" ? "active" : ""
             }`}
-            onClick={() =>
-              setActivePage("dashboard")
-            }
+            onClick={() => setActivePage("dashboard")}
           >
-            <span>⌂</span>
-            Dashboard
+            <span>⌂</span> Dashboard
           </button>
 
           <button
             className={`sidebar-link ${
-              activePage === "projects"
-                ? "active"
-                : ""
+              activePage === "projects" ? "active" : ""
             }`}
-            onClick={() =>
-              setActivePage("projects")
-            }
+            onClick={() => setActivePage("projects")}
           >
-            <span>▣</span>
-            Projects
+            <span>▣</span> Projects
           </button>
 
           <button
             className={`sidebar-link ${
-              activePage === "apis"
-                ? "active"
-                : ""
+              activePage === "apis" ? "active" : ""
             }`}
-            onClick={() =>
-              setActivePage("apis")
-            }
+            onClick={() => setActivePage("apis")}
           >
-            <span>⌘</span>
-            API Endpoints
+            <span>⌘</span> API Endpoints
           </button>
 
           <button
             className={`sidebar-link ${
-              activePage === "generator"
-                ? "active"
-                : ""
+              activePage === "generator" ? "active" : ""
             }`}
-            onClick={() =>
-              setActivePage("generator")
-            }
+            onClick={() => setActivePage("generator")}
           >
-            <span>✧</span>
-            AI Generator
+            <span>✧</span> Test Generator
           </button>
-          <button
-  className={`sidebar-link ${
-    activePage === "history"
-      ? "active"
-      : ""
-  }`}
-  onClick={() =>
-    setActivePage("history")
-  }
->
-  <span>◷</span>
-  Generation History
-</button>
 
+          <button
+            className={`sidebar-link ${
+              activePage === "history" ? "active" : ""
+            }`}
+            onClick={() => setActivePage("history")}
+          >
+            <span>◷</span> Generation History
+          </button>
         </nav>
 
         <div className="sidebar-bottom">
-
           <div className="sidebar-user">
-
             <div className="user-avatar">
               {(user?.email || "U")
                 .charAt(0)
@@ -1114,15 +1048,11 @@ useEffect(() => {
 
             <div>
               <strong>
-                {user?.user_metadata?.name ||
-                  "User"}
+                {user?.user_metadata?.name || "User"}
               </strong>
 
-              <span>
-                {user?.email}
-              </span>
+              <span>{user?.email}</span>
             </div>
-
           </div>
 
           <button
@@ -1131,15 +1061,12 @@ useEffect(() => {
           >
             Logout
           </button>
-
         </div>
-
       </aside>
 
       {/* MAIN CONTENT */}
 
       <main className="dashboard-main">
-
         {activePage === "dashboard" && (
           <Dashboard
             projects={projects}
@@ -1169,13 +1096,13 @@ useEffect(() => {
         )}
 
         {activePage === "history" && (
-  <GenerationHistory
-    generations={generations}
-    projectId={projectId}
-    projects={projects}
-    loading={generationLoading}
-  />
-)}
+          <GenerationHistory
+            generations={generations}
+            projectId={projectId}
+            projects={projects}
+            loading={generationLoading}
+          />
+        )}
 
         {activePage === "apis" && (
           <ApiEndpoints
@@ -1220,7 +1147,6 @@ useEffect(() => {
             handleDownload={handleDownload}
           />
         )}
-
       </main>
     </div>
   );

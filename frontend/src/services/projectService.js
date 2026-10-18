@@ -1,105 +1,83 @@
-import { supabase } from "./supabase";
+import { getCurrentUser } from "./authService";
 
-export async function getProjects() {
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser();
+const PROJECTS_KEY = "api_test_ai_projects";
+const APIS_KEY = "api_test_ai_endpoints";
 
-  if (userError) {
-    throw userError;
+function readList(key) {
+  try {
+    const value = JSON.parse(localStorage.getItem(key) || "[]");
+    return Array.isArray(value) ? value : [];
+  } catch {
+    return [];
   }
-
-  if (!user) {
-    throw new Error("User is not authenticated.");
-  }
-
-  const { data, error } = await supabase
-    .from("projects")
-    .select("*")
-    .eq("owner_id", user.id)
-    .order("created_at", { ascending: false });
-
-  if (error) {
-    throw error;
-  }
-
-  return data || [];
 }
 
-export async function createProject(name, description) {
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser();
-
-  if (userError) {
-    throw userError;
-  }
-
-  if (!user) {
-    throw new Error("User is not authenticated.");
-  }
-
-  const { data, error } = await supabase
-    .from("projects")
-    .insert([
-      {
-        name,
-        description,
-        owner_id: user.id,
-      },
-    ])
-    .select()
-    .single();
-
-  if (error) {
-    throw error;
-  }
-
-  return data;
+function writeList(key, value) {
+  localStorage.setItem(key, JSON.stringify(value));
 }
 
-
-
-/* =====================================================
-   API ENDPOINT FUNCTIONS
-===================================================== */
+function createId() {
+  return globalThis.crypto?.randomUUID?.() ||
+    `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
 
 function normalizeMethod(method) {
   return String(method || "").trim().toUpperCase();
 }
 
 function normalizeEndpoint(endpoint) {
-  const normalized = String(endpoint || "")
-    .trim()
-    .replace(/\/+/g, "/");
+  const value = String(endpoint || "").trim().replace(/\/+/g, "/");
 
-  if (!normalized) {
-    return "";
-  }
-
-  return normalized.startsWith("/")
-    ? normalized
-    : `/${normalized}`;
+  if (!value) return "";
+  return value.startsWith("/") ? value : `/${value}`;
 }
 
 function endpointKey(method, endpoint) {
   return `${normalizeMethod(method)} ${normalizeEndpoint(endpoint)}`;
 }
 
-export async function getProjectApis(projectId) {
-  const { data, error } = await supabase
-    .from("apis")
-    .select("*")
-    .eq("project_id", projectId)
-    .order("id", { ascending: true });
+export async function getProjects() {
+  const user = await getCurrentUser();
+  if (!user) return [];
 
-  if (error) {
-    throw error;
+  return readList(PROJECTS_KEY)
+    .filter((project) => project.owner_id === user.id)
+    .sort((a, b) => b.created_at.localeCompare(a.created_at));
+}
+
+export async function createProject(name, description) {
+  const user = await getCurrentUser();
+
+  if (!user) {
+    throw new Error("Please sign in first.");
   }
 
-  return data || [];
+  const cleanName = String(name || "").trim();
+  if (!cleanName) throw new Error("Project name is required.");
+
+  const project = {
+    id: createId(),
+    name: cleanName,
+    description: String(description || "").trim(),
+    owner_id: user.id,
+    created_at: new Date().toISOString(),
+  };
+
+  writeList(PROJECTS_KEY, [project, ...readList(PROJECTS_KEY)]);
+
+  return project;
+}
+
+export async function getProjectApis(projectId) {
+  const projects = await getProjects();
+
+  if (!projects.some((project) => project.id === projectId)) {
+    return [];
+  }
+
+  return readList(APIS_KEY)
+    .filter((api) => api.project_id === projectId)
+    .sort((a, b) => a.created_at.localeCompare(b.created_at));
 }
 
 export async function createProjectApi(apiData) {
@@ -108,131 +86,72 @@ export async function createProjectApi(apiData) {
   const endpoint = normalizeEndpoint(apiData.endpoint);
 
   if (!projectId || !method || !endpoint) {
-    throw new Error(
-      "Project, HTTP method, and endpoint are required."
-    );
+    throw new Error("Project, HTTP method, and endpoint are required.");
   }
 
-  // Check whether this endpoint already exists in the project.
-  const { data: existing, error: lookupError } = await supabase
-    .from("apis")
-    .select("*")
-    .eq("project_id", projectId)
-    .eq("method", method)
-    .eq("endpoint", endpoint)
-    .limit(1);
-
-  if (lookupError) {
-    throw lookupError;
+  const projects = await getProjects();
+  if (!projects.some((project) => project.id === projectId)) {
+    throw new Error("Please select a valid project.");
   }
 
-  if (existing && existing.length > 0) {
-    throw new Error(
-      `${method} ${endpoint} already exists in this project.`
-    );
+  const apis = await getProjectApis(projectId);
+  if (apis.some((api) => endpointKey(api.method, api.endpoint) === endpointKey(method, endpoint))) {
+    throw new Error(`${method} ${endpoint} already exists in this project.`);
   }
 
-  const { data, error } = await supabase
-    .from("apis")
-    .insert([
-      {
-        project_id: projectId,
-        method,
-        endpoint,
-        request_body: apiData.request_body || "",
-      },
-    ])
-    .select()
-    .single();
+  const newApi = {
+    id: createId(),
+    project_id: projectId,
+    method,
+    endpoint,
+    request_body: apiData.request_body || "",
+    created_at: new Date().toISOString(),
+  };
 
-  if (error) {
-    throw error;
-  }
-
-  return data;
+  writeList(APIS_KEY, [...readList(APIS_KEY), newApi]);
+  return newApi;
 }
 
-export async function createProjectApis(apis) {
-  if (!Array.isArray(apis) || apis.length === 0) {
-    return [];
-  }
+export async function createProjectApis(inputApis) {
+  if (!Array.isArray(inputApis) || inputApis.length === 0) return [];
 
-  // Remove duplicates within this import batch.
-  const uniqueApis = [];
-  const seen = new Set();
+  const projects = await getProjects();
+  const ownedProjectIds = new Set(projects.map((project) => project.id));
+  const existingApis = readList(APIS_KEY);
+  const existingKeys = new Set(
+    existingApis.map(
+      (api) => `${api.project_id}::${endpointKey(api.method, api.endpoint)}`
+    )
+  );
 
-  for (const api of apis) {
-    const projectId = api.project_id;
-    const method = normalizeMethod(api.method);
-    const endpoint = normalizeEndpoint(api.endpoint);
+  const batchKeys = new Set();
+  const additions = [];
 
-    if (!projectId || !method || !endpoint) {
-      continue;
-    }
+  for (const item of inputApis) {
+    const projectId = item.project_id;
+    const method = normalizeMethod(item.method);
+    const endpoint = normalizeEndpoint(item.endpoint);
 
-    const key =
-      `${projectId}::${endpointKey(method, endpoint)}`;
+    if (!ownedProjectIds.has(projectId) || !method || !endpoint) continue;
 
-    if (seen.has(key)) {
-      continue;
-    }
+    const key = `${projectId}::${endpointKey(method, endpoint)}`;
 
-    seen.add(key);
+    if (existingKeys.has(key) || batchKeys.has(key)) continue;
 
-    uniqueApis.push({
-      ...api,
+    batchKeys.add(key);
+    additions.push({
+      id: createId(),
+      project_id: projectId,
       method,
       endpoint,
+      request_body: item.request_body || "",
+      created_at: new Date().toISOString(),
     });
   }
 
-  if (uniqueApis.length === 0) {
-    return [];
+  if (additions.length > 0) {
+    writeList(APIS_KEY, [...existingApis, ...additions]);
   }
 
-  // Check existing endpoints for each project.
-  const projects = [
-    ...new Set(uniqueApis.map((api) => api.project_id)),
-  ];
-
-  const existingKeys = new Set();
-
-  for (const projectId of projects) {
-    const { data: existing, error } = await supabase
-      .from("apis")
-      .select("project_id, method, endpoint")
-      .eq("project_id", projectId);
-
-    if (error) {
-      throw error;
-    }
-
-    for (const api of existing || []) {
-      existingKeys.add(
-        `${projectId}::${endpointKey(api.method, api.endpoint)}`
-      );
-    }
-  }
-
-  const apisToInsert = uniqueApis.filter((api) => {
-    const key =
-      `${api.project_id}::${endpointKey(api.method, api.endpoint)}`;
-
-    return !existingKeys.has(key);
-  });
-
-  if (apisToInsert.length === 0) {
-    return [];
-  }
-
-  const { data, error } = await supabase
-    .from("apis")
-    .insert(apisToInsert)
-    .select();
-
-  if (error) {
-    throw error;
-  }
-
-  return data || [];
+  return additions;
 }
