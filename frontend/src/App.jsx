@@ -28,15 +28,61 @@ import {
 
 import "./App.css";
 
+// =====================================================
+// BROWSER STORAGE HELPERS
+// =====================================================
+
+function readStoredValue(key, fallbackValue) {
+  try {
+    const value = localStorage.getItem(key);
+
+    return value === null
+      ? fallbackValue
+      : JSON.parse(value);
+  } catch (error) {
+    console.error(`Could not read ${key}:`, error);
+    return fallbackValue;
+  }
+}
+
+function writeStoredValue(key, value) {
+  try {
+    if (value === null || value === undefined || value === "") {
+      localStorage.removeItem(key);
+      return;
+    }
+
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch (error) {
+    console.error(`Could not save ${key}:`, error);
+
+    if (error?.name === "QuotaExceededError") {
+      console.warn(
+        "Browser storage is full. Some workspace data could not be saved."
+      );
+    }
+  }
+}
+
+// =====================================================
+// MAIN APPLICATION
+// =====================================================
+
 function App() {
   // =====================================================
-  // NAVIGATION
+  // NAVIGATION — RESTORE LAST PAGE
   // =====================================================
 
-  const [activePage, setActivePage] = useState("dashboard");
+  const [activePage, setActivePage] = useState(() =>
+    readStoredValue("api_test_ai_last_page", "dashboard")
+  );
+
+  useEffect(() => {
+    writeStoredValue("api_test_ai_last_page", activePage);
+  }, [activePage]);
 
   // =====================================================
-  // LOCAL AUTHENTICATION
+  // AUTHENTICATION
   // =====================================================
 
   const [user, setUser] = useState(null);
@@ -56,11 +102,14 @@ function App() {
   const [registering, setRegistering] = useState(false);
 
   // =====================================================
-  // PROJECTS
+  // PROJECTS — RESTORE SELECTED PROJECT
   // =====================================================
 
   const [projects, setProjects] = useState([]);
-  const [projectId, setProjectId] = useState(null);
+
+  const [projectId, setProjectId] = useState(() =>
+    readStoredValue("api_test_ai_last_project_id", null)
+  );
 
   const [projectName, setProjectName] = useState("");
   const [projectDescription, setProjectDescription] = useState("");
@@ -68,6 +117,10 @@ function App() {
   const [projectLoading, setProjectLoading] = useState(false);
   const [projectError, setProjectError] = useState("");
   const [showCreateProject, setShowCreateProject] = useState(false);
+
+  useEffect(() => {
+    writeStoredValue("api_test_ai_last_project_id", projectId);
+  }, [projectId]);
 
   // =====================================================
   // API ENDPOINTS
@@ -83,25 +136,67 @@ function App() {
   const [apiLoading, setApiLoading] = useState(false);
 
   // =====================================================
-  // OPENAPI UPLOAD
+  // OPENAPI — RESTORE SPECIFICATION AND ENDPOINTS
   // =====================================================
 
   const [selectedFile, setSelectedFile] = useState(null);
-  const [openApiSpec, setOpenApiSpec] = useState(null);
-  const [importedApis, setImportedApis] = useState([]);
+
+  const [selectedFileName, setSelectedFileName] = useState(() =>
+    readStoredValue("api_test_ai_openapi_filename", "")
+  );
+
+  const [openApiSpec, setOpenApiSpec] = useState(() =>
+    readStoredValue("api_test_ai_openapi_spec", null)
+  );
+
+  const [importedApis, setImportedApis] = useState(() =>
+    readStoredValue("api_test_ai_imported_apis", [])
+  );
 
   const [uploadError, setUploadError] = useState("");
   const [uploading, setUploading] = useState(false);
 
+  useEffect(() => {
+    writeStoredValue(
+      "api_test_ai_openapi_filename",
+      selectedFileName
+    );
+  }, [selectedFileName]);
+
+  useEffect(() => {
+    writeStoredValue(
+      "api_test_ai_openapi_spec",
+      openApiSpec
+    );
+  }, [openApiSpec]);
+
+  useEffect(() => {
+    writeStoredValue(
+      "api_test_ai_imported_apis",
+      importedApis
+    );
+  }, [importedApis]);
+
+  // The File object itself cannot survive a page refresh.
+  // Restore its name for display while keeping actual file parsing safe.
+  const displaySelectedFile =
+    selectedFile ||
+    (selectedFileName ? { name: selectedFileName } : null);
+
   // =====================================================
-  // TEST-CODE GENERATION
+  // TEST GENERATION — RESTORE OUTPUT AFTER REFRESH
   // =====================================================
 
   const [targetLanguage, setTargetLanguage] = useState("Python");
   const [targetFramework, setTargetFramework] = useState("Pytest");
 
-  const [generatedCode, setGeneratedCode] = useState("");
-  const [generatedFilename, setGeneratedFilename] = useState("");
+  const [generatedCode, setGeneratedCode] = useState(() =>
+    readStoredValue("api_test_ai_generated_code", "")
+  );
+
+  const [generatedFilename, setGeneratedFilename] = useState(() =>
+    readStoredValue("api_test_ai_generated_filename", "")
+  );
 
   const [generations, setGenerations] = useState([]);
   const [generationLoading, setGenerationLoading] = useState(false);
@@ -109,8 +204,22 @@ function App() {
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState("");
 
+  useEffect(() => {
+    writeStoredValue(
+      "api_test_ai_generated_code",
+      generatedCode
+    );
+  }, [generatedCode]);
+
+  useEffect(() => {
+    writeStoredValue(
+      "api_test_ai_generated_filename",
+      generatedFilename
+    );
+  }, [generatedFilename]);
+
   // =====================================================
-  // CHECK LOCAL SESSION
+  // CHECK EXISTING LOCAL SESSION
   // =====================================================
 
   useEffect(() => {
@@ -123,7 +232,7 @@ function App() {
           setLoggedIn(true);
         }
       } catch (error) {
-        console.error("Local session loading error:", error);
+        console.error("Session loading error:", error);
       } finally {
         setAuthLoading(false);
       }
@@ -152,15 +261,27 @@ function App() {
 
         setProjects(projectList);
 
-        if (projectList.length > 0 && !projectId) {
-          setProjectId(projectList[0].id);
-          setProjectName(projectList[0].name || "");
+        const savedProject = projectList.find(
+          (project) => project.id === projectId
+        );
+
+        const selectedProject =
+          savedProject || projectList[0] || null;
+
+        if (selectedProject) {
+          setProjectId(selectedProject.id);
+          setProjectName(selectedProject.name || "");
           setProjectDescription(
-            projectList[0].description || ""
+            selectedProject.description || ""
           );
+        } else {
+          setProjectId(null);
+          setProjectName("");
+          setProjectDescription("");
         }
       } catch (error) {
         console.error("Project loading error:", error);
+
         setProjectError(
           error.message || "Failed to load projects."
         );
@@ -173,7 +294,7 @@ function App() {
   }, [loggedIn]);
 
   // =====================================================
-  // LOAD PROJECT API ENDPOINTS
+  // LOAD ENDPOINTS FOR SELECTED PROJECT
   // =====================================================
 
   useEffect(() => {
@@ -211,10 +332,7 @@ function App() {
         const data = await getProjectGenerations(projectId);
         setGenerations(data || []);
       } catch (error) {
-        console.error(
-          "Generation history loading error:",
-          error
-        );
+        console.error("Generation history loading error:", error);
       } finally {
         setGenerationLoading(false);
       }
@@ -241,7 +359,6 @@ function App() {
 
       setEmail("");
       setPassword("");
-      setActivePage("dashboard");
     } catch (error) {
       setLoginError(error.message || "Login failed.");
     } finally {
@@ -268,9 +385,9 @@ function App() {
 
       setShowRegister(false);
       setRegisterName("");
-      setRegisterEmail("");
       setRegisterPassword("");
       setEmail(registerEmail.trim());
+      setRegisterEmail("");
 
       alert(
         "Account created in this browser. Please sign in with your new account."
@@ -294,21 +411,6 @@ function App() {
 
       setUser(null);
       setLoggedIn(false);
-
-      setProjects([]);
-      setProjectId(null);
-      setProjectApis([]);
-      setGenerations([]);
-
-      setProjectName("");
-      setProjectDescription("");
-
-      setOpenApiSpec(null);
-      setSelectedFile(null);
-      setImportedApis([]);
-
-      setGeneratedCode("");
-      setGeneratedFilename("");
 
       setEmail("");
       setPassword("");
@@ -349,8 +451,9 @@ function App() {
       setProjectApis([]);
       setGenerations([]);
 
-      setOpenApiSpec(null);
       setSelectedFile(null);
+      setSelectedFileName("");
+      setOpenApiSpec(null);
       setImportedApis([]);
 
       setGeneratedCode("");
@@ -390,8 +493,9 @@ function App() {
     setUploadError("");
     setGenerateError("");
 
-    setOpenApiSpec(null);
     setSelectedFile(null);
+    setSelectedFileName("");
+    setOpenApiSpec(null);
     setImportedApis([]);
 
     setGeneratedCode("");
@@ -423,8 +527,7 @@ function App() {
 
     const duplicate = projectApis.some(
       (api) =>
-        String(api.method).toUpperCase() ===
-          apiMethod.toUpperCase() &&
+        String(api.method).toUpperCase() === apiMethod.toUpperCase() &&
         api.endpoint === normalizedEndpoint
     );
 
@@ -463,7 +566,7 @@ function App() {
   };
 
   // =====================================================
-  // SELECT OPENAPI FILE
+  // FILE SELECTION
   // =====================================================
 
   const handleFileChange = (event) => {
@@ -471,6 +574,7 @@ function App() {
 
     setUploadError("");
     setSelectedFile(file);
+    setSelectedFileName(file?.name || "");
 
     if (!file) {
       setOpenApiSpec(null);
@@ -497,7 +601,7 @@ function App() {
   };
 
   // =====================================================
-  // EXTRACT API ENDPOINTS
+  // EXTRACT ENDPOINTS FROM OPENAPI
   // =====================================================
 
   const extractApisFromSpec = (spec) => {
@@ -531,15 +635,11 @@ function App() {
 
         let requestBody = "";
 
-        const jsonSchema =
+        const schema =
           operation.requestBody?.content?.["application/json"]?.schema;
 
-        if (jsonSchema) {
-          requestBody = JSON.stringify(
-            jsonSchema,
-            null,
-            2
-          );
+        if (schema) {
+          requestBody = JSON.stringify(schema, null, 2);
         }
 
         endpoints.push({
@@ -554,7 +654,7 @@ function App() {
   };
 
   // =====================================================
-  // IMPORT OPENAPI SPECIFICATION
+  // IMPORT OPENAPI FILE
   // =====================================================
 
   const handleImportOpenApi = async () => {
@@ -569,7 +669,7 @@ function App() {
 
     if (!selectedFile) {
       setUploadError(
-        "Please select an OpenAPI JSON or YAML file."
+        "Please select an OpenAPI JSON or YAML file from your computer."
       );
       return;
     }
@@ -589,7 +689,7 @@ function App() {
 
       if (extractedApis.length === 0) {
         throw new Error(
-          "No API endpoints were found in the OpenAPI specification."
+          "No supported API endpoints were found in the OpenAPI specification."
         );
       }
 
@@ -645,8 +745,7 @@ function App() {
       console.error("OpenAPI import error:", error);
 
       setUploadError(
-        error.message ||
-          "Failed to import OpenAPI specification."
+        error.message || "Failed to import OpenAPI specification."
       );
     } finally {
       setUploading(false);
@@ -654,7 +753,7 @@ function App() {
   };
 
   // =====================================================
-  // CHANGE TARGET LANGUAGE AND FRAMEWORK
+  // CHANGE LANGUAGE AND FRAMEWORK
   // =====================================================
 
   const handleLanguageChange = (language) => {
@@ -662,13 +761,9 @@ function App() {
 
     if (language === "Python") {
       setTargetFramework("Pytest");
-    }
-
-    if (language === "Node.js") {
+    } else if (language === "Node.js") {
       setTargetFramework("Jest");
-    }
-
-    if (language === "Spring Boot") {
+    } else if (language === "Spring Boot") {
       setTargetFramework("JUnit");
     }
 
@@ -678,7 +773,7 @@ function App() {
   };
 
   // =====================================================
-  // GENERATE TEST CODE IN THE BROWSER
+  // GENERATE TEST CODE LOCALLY
   // =====================================================
 
   const generateTestCode = async () => {
@@ -693,12 +788,12 @@ function App() {
 
     if (!openApiSpec) {
       setGenerateError(
-        "Please upload an OpenAPI specification first."
+        "Please upload and import an OpenAPI specification first."
       );
       return;
     }
 
-    if (importedApis.length === 0) {
+    if (!importedApis.length) {
       setGenerateError(
         "No API endpoints are available for generation."
       );
@@ -739,7 +834,7 @@ function App() {
       const savedGeneration = await saveGeneration({
         projectId,
         openapiFilename:
-          selectedFile?.name || "OpenAPI specification",
+          selectedFileName || "OpenAPI specification",
         language: targetLanguage,
         framework: targetFramework,
         generatedFilename: finalFilename,
@@ -748,7 +843,9 @@ function App() {
 
       setGenerations((previous) => [
         savedGeneration,
-        ...previous,
+        ...previous.filter(
+          (item) => item.id !== savedGeneration.id
+        ),
       ]);
     } catch (error) {
       console.error("Test-code generation error:", error);
@@ -762,7 +859,7 @@ function App() {
   };
 
   // =====================================================
-  // DOWNLOAD GENERATED TEST FILE
+  // DOWNLOAD GENERATED FILE
   // =====================================================
 
   const handleDownload = () => {
@@ -803,7 +900,7 @@ function App() {
   }
 
   // =====================================================
-  // LOGIN AND REGISTER SCREENS
+  // LOGIN AND REGISTER
   // =====================================================
 
   if (!loggedIn) {
@@ -818,8 +915,7 @@ function App() {
                 <h1>API Test AI Generator</h1>
 
                 <p>
-                  Generate test-code files from OpenAPI
-                  specifications.
+                  Generate test-code files from OpenAPI specifications.
                 </p>
 
                 <form
@@ -862,15 +958,12 @@ function App() {
                     type="submit"
                     disabled={loggingIn}
                   >
-                    {loggingIn
-                      ? "Signing in..."
-                      : "Sign In →"}
+                    {loggingIn ? "Signing in..." : "Sign In →"}
                   </button>
                 </form>
 
                 <p className="auth-switch">
                   Don't have an account?{" "}
-
                   <button
                     type="button"
                     onClick={() => {
@@ -946,15 +1039,12 @@ function App() {
                     type="submit"
                     disabled={registering}
                   >
-                    {registering
-                      ? "Creating..."
-                      : "Create Account →"}
+                    {registering ? "Creating..." : "Create Account →"}
                   </button>
                 </form>
 
                 <p className="auth-switch">
                   Already have an account?{" "}
-
                   <button
                     type="button"
                     onClick={() => {
@@ -1041,9 +1131,7 @@ function App() {
         <div className="sidebar-bottom">
           <div className="sidebar-user">
             <div className="user-avatar">
-              {(user?.email || "U")
-                .charAt(0)
-                .toUpperCase()}
+              {(user?.email || "U").charAt(0).toUpperCase()}
             </div>
 
             <div>
@@ -1114,7 +1202,7 @@ function App() {
             apiRequestBody={apiRequestBody}
             apiError={apiError}
             apiLoading={apiLoading}
-            selectedFile={selectedFile}
+            selectedFile={displaySelectedFile}
             importedApis={importedApis}
             uploadError={uploadError}
             uploading={uploading}
@@ -1140,7 +1228,7 @@ function App() {
             generatedFilename={generatedFilename}
             generating={generating}
             generateError={generateError}
-            selectedFile={selectedFile}
+            selectedFile={displaySelectedFile}
             setTargetFramework={setTargetFramework}
             handleLanguageChange={handleLanguageChange}
             generateTestCode={generateTestCode}
