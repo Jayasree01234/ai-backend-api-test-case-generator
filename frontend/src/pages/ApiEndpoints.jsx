@@ -1,15 +1,14 @@
-
 function ApiEndpoints({
-  projects,
+  projects = [],
   projectId,
-  projectApis,
+  projectApis = [],
   apiMethod,
   apiEndpoint,
   apiRequestBody,
   apiError,
   apiLoading,
   selectedFile,
-  importedApis,
+  importedApis = [],
   uploadError,
   uploading,
   setApiMethod,
@@ -20,6 +19,9 @@ function ApiEndpoints({
   handleImportOpenApi,
   handleSelectProject,
 }) {
+  const hasSelectedFile =
+    selectedFile instanceof File;
+
   return (
     <div className="page-content">
       <div className="page-header">
@@ -43,9 +45,12 @@ function ApiEndpoints({
         </div>
 
         <div className="form-group">
-          <label>Select Project</label>
+          <label htmlFor="api-project-select">
+            Select Project
+          </label>
 
           <select
+            id="api-project-select"
             value={projectId || ""}
             onChange={(event) => {
               const project = projects.find(
@@ -96,9 +101,12 @@ function ApiEndpoints({
 
             <div className="form-grid">
               <div className="form-group">
-                <label>HTTP Method</label>
+                <label htmlFor="api-method">
+                  HTTP Method
+                </label>
 
                 <select
+                  id="api-method"
                   value={apiMethod}
                   onChange={(event) =>
                     setApiMethod(event.target.value)
@@ -113,9 +121,12 @@ function ApiEndpoints({
               </div>
 
               <div className="form-group">
-                <label>Endpoint</label>
+                <label htmlFor="api-endpoint">
+                  Endpoint
+                </label>
 
                 <input
+                  id="api-endpoint"
                   type="text"
                   value={apiEndpoint}
                   onChange={(event) =>
@@ -127,25 +138,29 @@ function ApiEndpoints({
             </div>
 
             <div className="form-group">
-              <label>Request Body</label>
+              <label htmlFor="api-request-body">
+                Request Body
+              </label>
 
               <textarea
+                id="api-request-body"
                 value={apiRequestBody}
                 onChange={(event) =>
                   setApiRequestBody(event.target.value)
                 }
                 placeholder='{"name":"John"}'
-                rows="5"
+                rows={5}
               />
             </div>
 
             {apiError && (
-              <div className="error-message">
+              <div className="error-message" role="alert">
                 {apiError}
               </div>
             )}
 
             <button
+              type="button"
               className="primary-button"
               onClick={handleCreateApi}
               disabled={apiLoading}
@@ -167,39 +182,62 @@ function ApiEndpoints({
             </div>
 
             <div className="upload-area">
+              <label htmlFor="openapi-file">
+                Choose OpenAPI file
+              </label>
+
               <input
+                id="openapi-file"
                 type="file"
-                accept=".json,.yaml,.yml"
+                accept=".json,.yaml,.yml,application/json,application/yaml,text/yaml"
                 onChange={handleFileChange}
+                disabled={uploading}
               />
 
-              {selectedFile && (
+              {hasSelectedFile && (
                 <div className="selected-file">
                   <strong>Selected file</strong>
                   <span>{selectedFile.name}</span>
                 </div>
               )}
 
+              {!hasSelectedFile && (
+                <p>
+                  Choose a JSON, YAML, or YML file from your computer.
+                  After refreshing the page, select the file again before
+                  importing it.
+                </p>
+              )}
+
               {uploadError && (
-                <div className="error-message">
+                <div className="error-message" role="alert">
                   {uploadError}
                 </div>
               )}
 
               <button
+                type="button"
                 className="primary-button"
                 onClick={handleImportOpenApi}
-                disabled={!selectedFile || uploading}
+                disabled={!hasSelectedFile || uploading}
               >
                 {uploading
                   ? "Importing..."
                   : "Import OpenAPI"}
               </button>
+
+              {uploading && (
+                <p role="status">
+                  Reading the OpenAPI specification and saving endpoints...
+                </p>
+              )}
             </div>
 
             {importedApis.length > 0 && (
               <div className="imported-api-list">
-                <h3>Detected Endpoints</h3>
+                <h3>
+                  Detected Endpoints ({importedApis.length})
+                </h3>
 
                 {importedApis.map((api, index) => (
                   <div

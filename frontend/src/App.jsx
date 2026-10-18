@@ -1202,7 +1202,7 @@ function App() {
             apiRequestBody={apiRequestBody}
             apiError={apiError}
             apiLoading={apiLoading}
-            selectedFile={displaySelectedFile}
+           selectedFile={selectedFile}
             importedApis={importedApis}
             uploadError={uploadError}
             uploading={uploading}
