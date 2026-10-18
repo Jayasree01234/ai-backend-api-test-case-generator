@@ -26,3 +26,10 @@ __pycache__/
 # Test-run cache files
 .pytest_cache/
 
+
+# Legacy backend excluded from frontend-only V2
+/ai-bridge/
+/app/
+/main.py
+/migrate_db.py
+/requirements.txt
