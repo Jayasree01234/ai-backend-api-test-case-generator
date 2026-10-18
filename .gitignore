@@ -15,3 +15,14 @@ app.db
 *.log
 node_modules/
 frontend/.env
+
+# Dependencies and generated files
+node_modules/
+**/node_modules/
+venv/
+__pycache__/
+*.pyc
+
+# Test-run cache files
+.pytest_cache/
+
