@@ -396,17 +396,19 @@ function App() {
     }
   };
 
-  const handleFileChange = (event) => {
-    const file = event.target.files?.[0] || null;
-    setUploadError("");
-    setSelectedFile(file);
-    setSelectedFileName(file?.name || "");
+  
+const handleFileChange = (event) => {
+  const file = event.target.files?.[0] || null;
 
-    if (!file) {
-      setOpenApiSpec(null);
-      setImportedApis([]);
-    }
-  };
+  setUploadError("");
+  setSelectedFile(file);
+  setSelectedFileName(file?.name || "");
+
+  // Clear results from the previously selected OpenAPI file.
+  setOpenApiSpec(null);
+  setImportedApis([]);
+};
+
 
   const parseOpenApiFile = async (file) => {
     const content = await file.text();
@@ -445,76 +447,121 @@ function App() {
     return endpoints;
   };
 
-  const handleImportOpenApi = async () => {
-    setUploadError("");
+  
+const handleImportOpenApi = async () => {
+  setUploadError("");
 
-    if (!projectId) {
-      setUploadError("Please create or select a project first.");
-      return;
-    }
-    if (!selectedFile) {
-      setUploadError("Please select an OpenAPI JSON or YAML file.");
-      return;
+  if (!projectId) {
+    setUploadError("Please create or select a project first.");
+    return;
+  }
+
+  if (!selectedFile) {
+    setUploadError("Please select an OpenAPI JSON or YAML file.");
+    return;
+  }
+
+  // Do not leave old detected endpoints visible during a new import.
+  setOpenApiSpec(null);
+  setImportedApis([]);
+
+  setUploading(true);
+
+  try {
+    const filename = selectedFile.name.toLowerCase();
+
+    if (
+      !filename.endsWith(".json") &&
+      !filename.endsWith(".yaml") &&
+      !filename.endsWith(".yml")
+    ) {
+      throw new Error(
+        "Unsupported file type. Please upload an OpenAPI JSON or YAML file."
+      );
     }
 
-    setUploading(true);
+    let spec;
+
     try {
-      const spec = await parseOpenApiFile(selectedFile);
-
-      if (!spec || (!spec.openapi && !spec.swagger)) {
-        throw new Error("The file is not a valid OpenAPI or Swagger specification.");
-      }
-
-      const extracted = extractApisFromSpec(spec);
-      if (!extracted.length) {
-        throw new Error("No supported API endpoints were found.");
-      }
-
-      const unique = [];
-      const seen = new Set();
-
-      extracted.forEach((api) => {
-        const key = `${api.method}:${api.endpoint}`;
-        if (!seen.has(key)) {
-          seen.add(key);
-          unique.push(api);
-        }
-      });
-
-      const existing = new Set(
-        projectApis.map(
-          (api) => `${String(api.method).toUpperCase()}:${api.endpoint}`
-        )
+      spec = await parseOpenApiFile(selectedFile);
+    } catch {
+      throw new Error(
+        "Invalid OpenAPI file. Please check that your JSON or YAML syntax is correct."
       );
-
-      const newApis = unique.filter(
-        (api) => !existing.has(`${api.method}:${api.endpoint}`)
-      );
-
-      let savedApis = [];
-      if (newApis.length) {
-        savedApis = await createProjectApis(
-          newApis.map((api) => ({
-            project_id: projectId,
-            method: api.method,
-            endpoint: api.endpoint,
-            request_body: api.request_body || "",
-          }))
-        );
-      }
-
-      setOpenApiSpec(spec);
-      setImportedApis(unique);
-      if (savedApis.length) {
-        setProjectApis((previous) => [...previous, ...savedApis]);
-      }
-    } catch (error) {
-      console.error("OpenAPI import error:", error);
-      setUploadError(error.message || "Failed to import OpenAPI specification.");
-    } finally {
-      setUploading(false);
     }
-  };
+
+    if (
+      !spec ||
+      typeof spec !== "object" ||
+      Array.isArray(spec) ||
+      (!spec.openapi && !spec.swagger)
+    ) {
+      throw new Error(
+        "This file is not a valid OpenAPI or Swagger specification."
+      );
+    }
+
+    const extracted = extractApisFromSpec(spec);
+
+    if (!extracted.length) {
+      throw new Error(
+        "No supported API endpoints were found in this specification."
+      );
+    }
+
+    const unique = [];
+    const seen = new Set();
+
+    extracted.forEach((api) => {
+      const key = `${api.method}:${api.endpoint}`;
+
+      if (!seen.has(key)) {
+        seen.add(key);
+        unique.push(api);
+      }
+    });
+
+    const existing = new Set(
+      projectApis.map(
+        (api) => `${String(api.method).toUpperCase()}:${api.endpoint}`
+      )
+    );
+
+    const newApis = unique.filter(
+      (api) => !existing.has(`${api.method}:${api.endpoint}`)
+    );
+
+    let savedApis = [];
+
+    if (newApis.length) {
+      savedApis = await createProjectApis(
+        newApis.map((api) => ({
+          project_id: projectId,
+          method: api.method,
+          endpoint: api.endpoint,
+          request_body: api.request_body || "",
+        }))
+      );
+    }
+
+    setOpenApiSpec(spec);
+    setImportedApis(unique);
+
+    if (savedApis.length) {
+      setProjectApis((previous) => [...previous, ...savedApis]);
+    }
+  } catch (error) {
+    console.error("OpenAPI import error:", error);
+    setOpenApiSpec(null);
+    setImportedApis([]);
+    setUploadError(
+      error.message || "Failed to import OpenAPI specification."
+    );
+  } finally {
+    setUploading(false);
+  }
+};
+
 
   const handleLanguageChange = (language) => {
     setTargetLanguage(language);
