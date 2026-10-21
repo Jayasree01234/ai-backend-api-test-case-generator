@@ -1,3 +1,4 @@
+
 function AiGenerator({
   projects,
   projectId,
@@ -12,49 +13,47 @@ function AiGenerator({
   handleLanguageChange,
   generateTestCode,
   handleDownload,
+  aiProgress = "",
+  aiAnalysis = null,
+  aiAnalysisIdeas = [],
 }) {
+  const selectedProject = projects.find(
+    (project) => String(project.id) === String(projectId)
+  );
+
   return (
     <div className="page-content">
       <div className="page-header">
         <div>
           <h1>AI Test Generator</h1>
           <p>
-            Generate executable API test code from your OpenAPI
-            specification.
+            Analyze an OpenAPI specification and generate an executable test file.
           </p>
         </div>
       </div>
 
-      {/* Generation Settings */}
       <div className="dashboard-card">
         <div className="card-header">
           <div>
             <h2>Generation Settings</h2>
-            <p>
-              Choose the target language and testing framework.
-            </p>
+            <p>Choose your target language and testing framework.</p>
           </div>
         </div>
 
         {!projectId ? (
           <div className="empty-state">
             <h3>Select a project first</h3>
-            <p>
-              Select a project before generating API tests.
-            </p>
+            <p>Select a project before generating API tests.</p>
           </div>
         ) : (
           <>
             <div className="form-grid">
-              {/* Target Language */}
               <div className="form-group">
                 <label>Target Language</label>
-
                 <select
                   value={targetLanguage}
-                  onChange={(event) =>
-                    handleLanguageChange(event.target.value)
-                  }
+                  onChange={(event) => handleLanguageChange(event.target.value)}
+                  disabled={generating}
                 >
                   <option value="Python">Python</option>
                   <option value="Node.js">Node.js</option>
@@ -62,15 +61,12 @@ function AiGenerator({
                 </select>
               </div>
 
-              {/* Framework */}
               <div className="form-group">
                 <label>Testing Framework</label>
-
                 <select
                   value={targetFramework}
-                  onChange={(event) =>
-                    setTargetFramework(event.target.value)
-                  }
+                  onChange={(event) => setTargetFramework(event.target.value)}
+                  disabled={generating}
                 >
                   {targetLanguage === "Python" && (
                     <>
@@ -96,69 +92,93 @@ function AiGenerator({
               </div>
             </div>
 
-            {/* Generation Summary */}
             <div className="generator-summary">
               <div>
                 <span>Project</span>
-
-                <strong>
-                  {projects.find(
-                    (project) =>
-                      String(project.id) === String(projectId)
-                  )?.name || "Selected project"}
-                </strong>
+                <strong>{selectedProject?.name || "Selected project"}</strong>
               </div>
 
               <div>
                 <span>OpenAPI File</span>
-
-                <strong>
-                  {selectedFile
-                    ? selectedFile.name
-                    : "OpenAPI specification"}
-                </strong>
+                <strong>{selectedFile?.name || "OpenAPI specification"}</strong>
               </div>
 
               <div>
                 <span>Output</span>
-
-                <strong>
-                  {targetLanguage} / {targetFramework}
-                </strong>
+                <strong>{targetLanguage} / {targetFramework}</strong>
               </div>
             </div>
 
             {generateError && (
-              <div className="error-message">
+              <div className="error-message" role="alert">
                 {generateError}
               </div>
             )}
 
+            {generating && (
+              <div className="dashboard-card" aria-live="polite">
+                <h3>AI is working</h3>
+                <p>
+                  {aiProgress ||
+                    "Preparing the OpenAPI specification for analysis..."}
+                </p>
+                <p>
+                  The first run may take longer while the browser downloads the
+                  AI model. WebGPU support is required.
+                </p>
+              </div>
+            )}
+
             <button
+              type="button"
               className="primary-button generate-button"
               onClick={generateTestCode}
               disabled={generating}
             >
-              {generating
-                ? "Generating Test Code..."
-                : "✧ Generate Test Code"}
+              {generating ? "Generating Test Code..." : "✧ Generate Test Code"}
             </button>
           </>
         )}
       </div>
 
-      {/* Generated Code */}
+      {aiAnalysis && (
+        <div className="dashboard-card">
+          <div className="card-header">
+            <div>
+              <h2>AI Analysis</h2>
+              <p>Overview returned by the browser AI model.</p>
+            </div>
+          </div>
+
+          <p>{aiAnalysis}</p>
+
+          {aiAnalysisIdeas.length > 0 && (
+            <>
+              <h3>Additional Test Ideas</h3>
+              <ul>
+                {aiAnalysisIdeas.map((idea, index) => (
+                  <li key={`${index}-${idea}`}>{idea}</li>
+                ))}
+              </ul>
+              <p>
+                These are suggestions only. They are not necessarily included
+                in the generated executable test file.
+              </p>
+            </>
+          )}
+        </div>
+      )}
+
       {generatedCode && (
         <div className="dashboard-card">
           <div className="card-header">
             <div>
               <h2>Generated Test Code</h2>
-              <p>
-                Your generated test file is ready to use.
-              </p>
+              <p>Your generated test file is ready to review and download.</p>
             </div>
 
             <button
+              type="button"
               className="secondary-button"
               onClick={handleDownload}
             >
@@ -166,9 +186,7 @@ function AiGenerator({
             </button>
           </div>
 
-          <div className="generated-file-name">
-            {generatedFilename}
-          </div>
+          <div className="generated-file-name">{generatedFilename}</div>
 
           <pre className="code-window">
             <code>{generatedCode}</code>

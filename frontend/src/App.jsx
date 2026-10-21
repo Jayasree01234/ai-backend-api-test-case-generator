@@ -1,3 +1,4 @@
+
 import { useEffect, useState } from "react";
 import * as yaml from "js-yaml";
 
@@ -8,37 +9,16 @@ import AiGenerator from "./pages/AiGenerator";
 import GenerationHistory from "./pages/GenerationHistory";
 
 import { generateTestsWithAI } from "./services/aiService";
-import {
-  saveGeneration,
-  getProjectGenerations,
-} from "./services/generationService";
-import {
-  registerUser,
-  loginUser,
-  logoutUser,
-  getCurrentUser,
-} from "./services/authService";
-import {
-  getProjects,
-  createProject,
-  getProjectApis,
-  createProjectApi,
-  createProjectApis,
-} from "./services/projectService";
+import { saveGeneration, getProjectGenerations } from "./services/generationService";
+import { registerUser, loginUser, logoutUser, getCurrentUser } from "./services/authService";
+import { getProjects, createProject, getProjectApis, createProjectApi, createProjectApis } from "./services/projectService";
 
 import "./App.css";
-
-// =====================================================
-// BROWSER STORAGE HELPERS
-// =====================================================
 
 function readStoredValue(key, fallbackValue) {
   try {
     const value = localStorage.getItem(key);
-
-    return value === null
-      ? fallbackValue
-      : JSON.parse(value);
+    return value === null ? fallbackValue : JSON.parse(value);
   } catch (error) {
     console.error(`Could not read ${key}:`, error);
     return fallbackValue;
@@ -49,30 +29,15 @@ function writeStoredValue(key, value) {
   try {
     if (value === null || value === undefined || value === "") {
       localStorage.removeItem(key);
-      return;
+    } else {
+      localStorage.setItem(key, JSON.stringify(value));
     }
-
-    localStorage.setItem(key, JSON.stringify(value));
   } catch (error) {
     console.error(`Could not save ${key}:`, error);
-
-    if (error?.name === "QuotaExceededError") {
-      console.warn(
-        "Browser storage is full. Some workspace data could not be saved."
-      );
-    }
   }
 }
 
-// =====================================================
-// MAIN APPLICATION
-// =====================================================
-
 function App() {
-  // =====================================================
-  // NAVIGATION — RESTORE LAST PAGE
-  // =====================================================
-
   const [activePage, setActivePage] = useState(() =>
     readStoredValue("api_test_ai_last_page", "dashboard")
   );
@@ -81,10 +46,7 @@ function App() {
     writeStoredValue("api_test_ai_last_page", activePage);
   }, [activePage]);
 
-  // =====================================================
-  // AUTHENTICATION
-  // =====================================================
-
+  // Authentication
   const [user, setUser] = useState(null);
   const [loggedIn, setLoggedIn] = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
@@ -101,19 +63,13 @@ function App() {
   const [registerError, setRegisterError] = useState("");
   const [registering, setRegistering] = useState(false);
 
-  // =====================================================
-  // PROJECTS — RESTORE SELECTED PROJECT
-  // =====================================================
-
+  // Projects
   const [projects, setProjects] = useState([]);
-
   const [projectId, setProjectId] = useState(() =>
     readStoredValue("api_test_ai_last_project_id", null)
   );
-
   const [projectName, setProjectName] = useState("");
   const [projectDescription, setProjectDescription] = useState("");
-
   const [projectLoading, setProjectLoading] = useState(false);
   const [projectError, setProjectError] = useState("");
   const [showCreateProject, setShowCreateProject] = useState(false);
@@ -122,111 +78,73 @@ function App() {
     writeStoredValue("api_test_ai_last_project_id", projectId);
   }, [projectId]);
 
-  // =====================================================
-  // API ENDPOINTS
-  // =====================================================
-
+  // Manual API endpoints
   const [projectApis, setProjectApis] = useState([]);
-
   const [apiMethod, setApiMethod] = useState("GET");
   const [apiEndpoint, setApiEndpoint] = useState("");
   const [apiRequestBody, setApiRequestBody] = useState("");
-
   const [apiError, setApiError] = useState("");
   const [apiLoading, setApiLoading] = useState(false);
 
-  // =====================================================
-  // OPENAPI — RESTORE SPECIFICATION AND ENDPOINTS
-  // =====================================================
-
+  // OpenAPI import
   const [selectedFile, setSelectedFile] = useState(null);
-
   const [selectedFileName, setSelectedFileName] = useState(() =>
     readStoredValue("api_test_ai_openapi_filename", "")
   );
-
   const [openApiSpec, setOpenApiSpec] = useState(() =>
     readStoredValue("api_test_ai_openapi_spec", null)
   );
-
   const [importedApis, setImportedApis] = useState(() =>
     readStoredValue("api_test_ai_imported_apis", [])
   );
-
   const [uploadError, setUploadError] = useState("");
   const [uploading, setUploading] = useState(false);
 
   useEffect(() => {
-    writeStoredValue(
-      "api_test_ai_openapi_filename",
-      selectedFileName
-    );
+    writeStoredValue("api_test_ai_openapi_filename", selectedFileName);
   }, [selectedFileName]);
 
   useEffect(() => {
-    writeStoredValue(
-      "api_test_ai_openapi_spec",
-      openApiSpec
-    );
+    writeStoredValue("api_test_ai_openapi_spec", openApiSpec);
   }, [openApiSpec]);
 
   useEffect(() => {
-    writeStoredValue(
-      "api_test_ai_imported_apis",
-      importedApis
-    );
+    writeStoredValue("api_test_ai_imported_apis", importedApis);
   }, [importedApis]);
 
-  // The File object itself cannot survive a page refresh.
-  // Restore its name for display while keeping actual file parsing safe.
   const displaySelectedFile =
-    selectedFile ||
-    (selectedFileName ? { name: selectedFileName } : null);
+    selectedFile || (selectedFileName ? { name: selectedFileName } : null);
 
-  // =====================================================
-  // TEST GENERATION — RESTORE OUTPUT AFTER REFRESH
-  // =====================================================
-
+  // Test generation and AI results
   const [targetLanguage, setTargetLanguage] = useState("Python");
   const [targetFramework, setTargetFramework] = useState("Pytest");
-
   const [generatedCode, setGeneratedCode] = useState(() =>
     readStoredValue("api_test_ai_generated_code", "")
   );
-
   const [generatedFilename, setGeneratedFilename] = useState(() =>
     readStoredValue("api_test_ai_generated_filename", "")
   );
-
   const [generations, setGenerations] = useState([]);
   const [generationLoading, setGenerationLoading] = useState(false);
-
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState("");
+  const [aiProgress, setAiProgress] = useState("");
+  const [aiAnalysis, setAiAnalysis] = useState(null);
+  const [aiAnalysisIdeas, setAiAnalysisIdeas] = useState([]);
 
   useEffect(() => {
-    writeStoredValue(
-      "api_test_ai_generated_code",
-      generatedCode
-    );
+    writeStoredValue("api_test_ai_generated_code", generatedCode);
   }, [generatedCode]);
 
   useEffect(() => {
-    writeStoredValue(
-      "api_test_ai_generated_filename",
-      generatedFilename
-    );
+    writeStoredValue("api_test_ai_generated_filename", generatedFilename);
   }, [generatedFilename]);
 
-  // =====================================================
-  // CHECK EXISTING LOCAL SESSION
-  // =====================================================
-
+  // Restore local session
   useEffect(() => {
     async function loadUser() {
       try {
         const currentUser = await getCurrentUser();
-
         if (currentUser) {
           setUser(currentUser);
           setLoggedIn(true);
@@ -237,14 +155,10 @@ function App() {
         setAuthLoading(false);
       }
     }
-
     loadUser();
   }, []);
 
-  // =====================================================
-  // LOAD PROJECTS
-  // =====================================================
-
+  // Load projects
   useEffect(() => {
     if (!loggedIn) {
       setProjects([]);
@@ -254,26 +168,20 @@ function App() {
     async function loadProjects() {
       setProjectLoading(true);
       setProjectError("");
-
       try {
         const data = await getProjects();
         const projectList = data || [];
-
         setProjects(projectList);
 
-        const savedProject = projectList.find(
-          (project) => project.id === projectId
-        );
+        const selected =
+          projectList.find((project) => String(project.id) === String(projectId)) ||
+          projectList[0] ||
+          null;
 
-        const selectedProject =
-          savedProject || projectList[0] || null;
-
-        if (selectedProject) {
-          setProjectId(selectedProject.id);
-          setProjectName(selectedProject.name || "");
-          setProjectDescription(
-            selectedProject.description || ""
-          );
+        if (selected) {
+          setProjectId(selected.id);
+          setProjectName(selected.name || "");
+          setProjectDescription(selected.description || "");
         } else {
           setProjectId(null);
           setProjectName("");
@@ -281,22 +189,18 @@ function App() {
         }
       } catch (error) {
         console.error("Project loading error:", error);
-
-        setProjectError(
-          error.message || "Failed to load projects."
-        );
+        setProjectError(error.message || "Failed to load projects.");
       } finally {
         setProjectLoading(false);
       }
     }
 
     loadProjects();
+    // Initial load after login; selection changes are handled separately.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loggedIn]);
 
-  // =====================================================
-  // LOAD ENDPOINTS FOR SELECTED PROJECT
-  // =====================================================
-
+  // Load APIs
   useEffect(() => {
     if (!projectId || !loggedIn) {
       setProjectApis([]);
@@ -305,8 +209,7 @@ function App() {
 
     async function loadApis() {
       try {
-        const data = await getProjectApis(projectId);
-        setProjectApis(data || []);
+        setProjectApis((await getProjectApis(projectId)) || []);
       } catch (error) {
         console.error("API endpoint loading error:", error);
       }
@@ -315,10 +218,7 @@ function App() {
     loadApis();
   }, [projectId, loggedIn]);
 
-  // =====================================================
-  // LOAD GENERATION HISTORY
-  // =====================================================
-
+  // Load history
   useEffect(() => {
     if (!projectId || !loggedIn) {
       setGenerations([]);
@@ -327,10 +227,8 @@ function App() {
 
     async function loadGenerations() {
       setGenerationLoading(true);
-
       try {
-        const data = await getProjectGenerations(projectId);
-        setGenerations(data || []);
+        setGenerations((await getProjectGenerations(projectId)) || []);
       } catch (error) {
         console.error("Generation history loading error:", error);
       } finally {
@@ -341,22 +239,15 @@ function App() {
     loadGenerations();
   }, [projectId, loggedIn]);
 
-  // =====================================================
-  // LOGIN
-  // =====================================================
-
   const handleLogin = async (event) => {
     event.preventDefault();
-
     setLoginError("");
     setLoggingIn(true);
 
     try {
       const data = await loginUser(email, password);
-
       setUser(data.user);
       setLoggedIn(true);
-
       setEmail("");
       setPassword("");
     } catch (error) {
@@ -366,64 +257,50 @@ function App() {
     }
   };
 
-  // =====================================================
-  // REGISTER
-  // =====================================================
-
   const handleRegister = async (event) => {
     event.preventDefault();
-
     setRegisterError("");
     setRegistering(true);
 
     try {
-      await registerUser(
-        registerName,
-        registerEmail,
-        registerPassword
-      );
-
+      await registerUser(registerName, registerEmail, registerPassword);
       setShowRegister(false);
       setRegisterName("");
       setRegisterPassword("");
       setEmail(registerEmail.trim());
       setRegisterEmail("");
-
-      alert(
-        "Account created in this browser. Please sign in with your new account."
-      );
+      alert("Account created in this browser. Please sign in.");
     } catch (error) {
-      setRegisterError(
-        error.message || "Registration failed."
-      );
+      setRegisterError(error.message || "Registration failed.");
     } finally {
       setRegistering(false);
     }
   };
 
-  // =====================================================
-  // LOGOUT
-  // =====================================================
-
   const handleLogout = async () => {
     try {
       await logoutUser();
-
       setUser(null);
       setLoggedIn(false);
-
       setEmail("");
       setPassword("");
-
       setActivePage("dashboard");
     } catch (error) {
       console.error("Logout error:", error);
     }
   };
 
-  // =====================================================
-  // CREATE PROJECT
-  // =====================================================
+  const clearProjectWorkspace = () => {
+    setSelectedFile(null);
+    setSelectedFileName("");
+    setOpenApiSpec(null);
+    setImportedApis([]);
+    setGeneratedCode("");
+    setGeneratedFilename("");
+    setAiProgress("");
+    setAiAnalysis(null);
+    setAiAnalysisIdeas([]);
+  };
 
   const handleCreateProject = async (event) => {
     event.preventDefault();
@@ -442,136 +319,85 @@ function App() {
         projectDescription.trim()
       );
 
-      setProjects((previous) => [
-        newProject,
-        ...previous,
-      ]);
-
+      setProjects((previous) => [newProject, ...previous]);
       setProjectId(newProject.id);
       setProjectApis([]);
       setGenerations([]);
-
-      setSelectedFile(null);
-      setSelectedFileName("");
-      setOpenApiSpec(null);
-      setImportedApis([]);
-
-      setGeneratedCode("");
-      setGeneratedFilename("");
-
+      clearProjectWorkspace();
       setProjectName("");
       setProjectDescription("");
       setShowCreateProject(false);
     } catch (error) {
-      setProjectError(
-        error.message || "Failed to create project."
-      );
+      setProjectError(error.message || "Failed to create project.");
     } finally {
       setProjectLoading(false);
     }
   };
 
-  // =====================================================
-  // SELECT PROJECT
-  // =====================================================
-
   const handleSelectProject = (id) => {
-    const selectedProject = projects.find(
-      (project) => project.id === id
-    );
-
+    const selected = projects.find((project) => String(project.id) === String(id));
     setProjectId(id);
 
-    if (selectedProject) {
-      setProjectName(selectedProject.name || "");
-      setProjectDescription(
-        selectedProject.description || ""
-      );
+    if (selected) {
+      setProjectName(selected.name || "");
+      setProjectDescription(selected.description || "");
     }
 
     setApiError("");
     setUploadError("");
     setGenerateError("");
-
-    setSelectedFile(null);
-    setSelectedFileName("");
-    setOpenApiSpec(null);
-    setImportedApis([]);
-
-    setGeneratedCode("");
-    setGeneratedFilename("");
+    clearProjectWorkspace();
   };
-
-  // =====================================================
-  // CREATE MANUAL API ENDPOINT
-  // =====================================================
 
   const handleCreateApi = async (event) => {
     event.preventDefault();
-
     setApiError("");
 
     if (!projectId) {
       setApiError("Please select a project first.");
       return;
     }
-
     if (!apiEndpoint.trim()) {
       setApiError("API endpoint is required.");
       return;
     }
 
-    const normalizedEndpoint = apiEndpoint.trim().startsWith("/")
+    const endpoint = apiEndpoint.trim().startsWith("/")
       ? apiEndpoint.trim()
       : `/${apiEndpoint.trim()}`;
 
     const duplicate = projectApis.some(
       (api) =>
         String(api.method).toUpperCase() === apiMethod.toUpperCase() &&
-        api.endpoint === normalizedEndpoint
+        api.endpoint === endpoint
     );
 
     if (duplicate) {
-      setApiError(
-        "This API endpoint already exists in the project."
-      );
+      setApiError("This API endpoint already exists in the project.");
       return;
     }
 
     setApiLoading(true);
-
     try {
       const newApi = await createProjectApi({
         project_id: projectId,
         method: apiMethod,
-        endpoint: normalizedEndpoint,
+        endpoint,
         request_body: apiRequestBody.trim(),
       });
-
-      setProjectApis((previous) => [
-        ...previous,
-        newApi,
-      ]);
-
+      setProjectApis((previous) => [...previous, newApi]);
       setApiMethod("GET");
       setApiEndpoint("");
       setApiRequestBody("");
     } catch (error) {
-      setApiError(
-        error.message || "Failed to create API endpoint."
-      );
+      setApiError(error.message || "Failed to create API endpoint.");
     } finally {
       setApiLoading(false);
     }
   };
 
-  // =====================================================
-  // FILE SELECTION
-  // =====================================================
-
   const handleFileChange = (event) => {
     const file = event.target.files?.[0] || null;
-
     setUploadError("");
     setSelectedFile(file);
     setSelectedFileName(file?.name || "");
@@ -582,70 +408,36 @@ function App() {
     }
   };
 
-  // =====================================================
-  // PARSE JSON OR YAML
-  // =====================================================
-
   const parseOpenApiFile = async (file) => {
-    const text = await file.text();
+    const content = await file.text();
     const filename = file.name.toLowerCase();
 
-    if (
-      filename.endsWith(".yaml") ||
-      filename.endsWith(".yml")
-    ) {
-      return yaml.load(text);
+    if (filename.endsWith(".yaml") || filename.endsWith(".yml")) {
+      return yaml.load(content);
     }
-
-    return JSON.parse(text);
+    return JSON.parse(content);
   };
-
-  // =====================================================
-  // EXTRACT ENDPOINTS FROM OPENAPI
-  // =====================================================
 
   const extractApisFromSpec = (spec) => {
     const endpoints = [];
+    if (!spec?.paths || typeof spec.paths !== "object") return endpoints;
 
-    if (!spec?.paths || typeof spec.paths !== "object") {
-      return endpoints;
-    }
-
-    const methods = [
-      "get",
-      "post",
-      "put",
-      "patch",
-      "delete",
-      "options",
-      "head",
-    ];
+    const methods = ["get", "post", "put", "patch", "delete", "options", "head"];
 
     Object.entries(spec.paths).forEach(([path, pathItem]) => {
-      if (!pathItem || typeof pathItem !== "object") {
-        return;
-      }
+      if (!pathItem || typeof pathItem !== "object") return;
 
       methods.forEach((method) => {
         const operation = pathItem[method];
-
-        if (!operation || typeof operation !== "object") {
-          return;
-        }
-
-        let requestBody = "";
+        if (!operation || typeof operation !== "object") return;
 
         const schema =
           operation.requestBody?.content?.["application/json"]?.schema;
 
-        if (schema) {
-          requestBody = JSON.stringify(schema, null, 2);
-        }
-
         endpoints.push({
           method: method.toUpperCase(),
           endpoint: path,
-          request_body: requestBody,
+          request_body: schema ? JSON.stringify(schema, null, 2) : "",
         });
       });
     });
@@ -653,241 +445,180 @@ function App() {
     return endpoints;
   };
 
-  // =====================================================
-  // IMPORT OPENAPI FILE
-  // =====================================================
-
   const handleImportOpenApi = async () => {
     setUploadError("");
 
     if (!projectId) {
-      setUploadError(
-        "Please create or select a project first."
-      );
+      setUploadError("Please create or select a project first.");
       return;
     }
-
     if (!selectedFile) {
-      setUploadError(
-        "Please select an OpenAPI JSON or YAML file from your computer."
-      );
+      setUploadError("Please select an OpenAPI JSON or YAML file.");
       return;
     }
 
     setUploading(true);
-
     try {
       const spec = await parseOpenApiFile(selectedFile);
 
       if (!spec || (!spec.openapi && !spec.swagger)) {
-        throw new Error(
-          "The uploaded file does not appear to be a valid OpenAPI or Swagger specification."
-        );
+        throw new Error("The file is not a valid OpenAPI or Swagger specification.");
       }
 
-      const extractedApis = extractApisFromSpec(spec);
-
-      if (extractedApis.length === 0) {
-        throw new Error(
-          "No supported API endpoints were found in the OpenAPI specification."
-        );
+      const extracted = extractApisFromSpec(spec);
+      if (!extracted.length) {
+        throw new Error("No supported API endpoints were found.");
       }
 
-      const uniqueImportedApis = [];
+      const unique = [];
       const seen = new Set();
 
-      extractedApis.forEach((api) => {
+      extracted.forEach((api) => {
         const key = `${api.method}:${api.endpoint}`;
-
         if (!seen.has(key)) {
           seen.add(key);
-          uniqueImportedApis.push(api);
+          unique.push(api);
         }
       });
 
-      const existingKeys = new Set(
+      const existing = new Set(
         projectApis.map(
-          (api) =>
-            `${String(api.method).toUpperCase()}:${api.endpoint}`
+          (api) => `${String(api.method).toUpperCase()}:${api.endpoint}`
         )
       );
 
-      const newApis = uniqueImportedApis.filter(
-        (api) =>
-          !existingKeys.has(
-            `${api.method}:${api.endpoint}`
-          )
+      const newApis = unique.filter(
+        (api) => !existing.has(`${api.method}:${api.endpoint}`)
       );
 
       let savedApis = [];
-
-      if (newApis.length > 0) {
-        const apisForStorage = newApis.map((api) => ({
-          project_id: projectId,
-          method: api.method,
-          endpoint: api.endpoint,
-          request_body: api.request_body || "",
-        }));
-
-        savedApis = await createProjectApis(apisForStorage);
+      if (newApis.length) {
+        savedApis = await createProjectApis(
+          newApis.map((api) => ({
+            project_id: projectId,
+            method: api.method,
+            endpoint: api.endpoint,
+            request_body: api.request_body || "",
+          }))
+        );
       }
 
       setOpenApiSpec(spec);
-      setImportedApis(uniqueImportedApis);
-
-      if (savedApis.length > 0) {
-        setProjectApis((previous) => [
-          ...previous,
-          ...savedApis,
-        ]);
+      setImportedApis(unique);
+      if (savedApis.length) {
+        setProjectApis((previous) => [...previous, ...savedApis]);
       }
     } catch (error) {
       console.error("OpenAPI import error:", error);
-
-      setUploadError(
-        error.message || "Failed to import OpenAPI specification."
-      );
+      setUploadError(error.message || "Failed to import OpenAPI specification.");
     } finally {
       setUploading(false);
     }
   };
 
-  // =====================================================
-  // CHANGE LANGUAGE AND FRAMEWORK
-  // =====================================================
-
   const handleLanguageChange = (language) => {
     setTargetLanguage(language);
 
-    if (language === "Python") {
-      setTargetFramework("Pytest");
-    } else if (language === "Node.js") {
-      setTargetFramework("Jest");
-    } else if (language === "Spring Boot") {
-      setTargetFramework("JUnit");
-    }
+    if (language === "Python") setTargetFramework("Pytest");
+    else if (language === "Node.js") setTargetFramework("Jest");
+    else if (language === "Spring Boot") setTargetFramework("JUnit");
 
     setGeneratedCode("");
     setGeneratedFilename("");
     setGenerateError("");
+    setAiProgress("");
+    setAiAnalysis(null);
+    setAiAnalysisIdeas([]);
   };
-
-  // =====================================================
-  // GENERATE TEST CODE LOCALLY
-  // =====================================================
 
   const generateTestCode = async () => {
     setGenerateError("");
+    setAiProgress("");
+    setAiAnalysis(null);
+    setAiAnalysisIdeas([]);
 
     if (!projectId) {
-      setGenerateError(
-        "Please create or open a project first."
-      );
+      setGenerateError("Please create or open a project first.");
       return;
     }
-
     if (!openApiSpec) {
-      setGenerateError(
-        "Please upload and import an OpenAPI specification first."
-      );
+      setGenerateError("Please upload and import an OpenAPI specification first.");
       return;
     }
-
     if (!importedApis.length) {
-      setGenerateError(
-        "No API endpoints are available for generation."
-      );
+      setGenerateError("No API endpoints are available for generation.");
       return;
     }
 
     setGenerating(true);
     setGeneratedCode("");
     setGeneratedFilename("");
+    setAiProgress("Preparing browser AI...");
 
     try {
       const result = await generateTestsWithAI(
         openApiSpec,
         targetLanguage,
-        targetFramework
+        targetFramework,
+        (message) => setAiProgress(message)
       );
 
       if (!result?.generatedCode) {
-        throw new Error(
-          "The test generator did not return any code."
-        );
+        throw new Error("The test generator did not return any code.");
       }
 
-      const fallbackFilenames = {
+      const fallbackNames = {
         Python: "test_api.py",
         "Node.js": "api.test.js",
         "Spring Boot": "ApiTest.java",
       };
 
-      const finalFilename =
-        result.filename ||
-        fallbackFilenames[targetLanguage] ||
-        "generated_tests.txt";
+      const filename =
+        result.filename || fallbackNames[targetLanguage] || "generated_tests.txt";
 
       setGeneratedCode(result.generatedCode);
-      setGeneratedFilename(finalFilename);
+      setGeneratedFilename(filename);
+      setAiAnalysis(result.aiOverview || null);
+      setAiAnalysisIdeas(result.additionalTestIdeas || []);
+      setAiProgress("Generation completed.");
 
       const savedGeneration = await saveGeneration({
         projectId,
-        openapiFilename:
-          selectedFileName || "OpenAPI specification",
+        openapiFilename: selectedFileName || "OpenAPI specification",
         language: targetLanguage,
         framework: targetFramework,
-        generatedFilename: finalFilename,
+        generatedFilename: filename,
         generatedCode: result.generatedCode,
       });
 
       setGenerations((previous) => [
         savedGeneration,
-        ...previous.filter(
-          (item) => item.id !== savedGeneration.id
-        ),
+        ...previous.filter((item) => item.id !== savedGeneration.id),
       ]);
     } catch (error) {
       console.error("Test-code generation error:", error);
-
-      setGenerateError(
-        error.message || "Failed to generate test code."
-      );
+      setGenerateError(error.message || "Failed to generate test code.");
     } finally {
       setGenerating(false);
     }
   };
 
-  // =====================================================
-  // DOWNLOAD GENERATED FILE
-  // =====================================================
-
   const handleDownload = () => {
-    if (!generatedCode) {
-      return;
-    }
+    if (!generatedCode) return;
 
     const blob = new Blob([generatedCode], {
       type: "text/plain;charset=utf-8",
     });
-
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
 
     link.href = url;
-    link.download =
-      generatedFilename || "generated_tests.txt";
-
+    link.download = generatedFilename || "generated_tests.txt";
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
-
-  // =====================================================
-  // LOADING SCREEN
-  // =====================================================
 
   if (authLoading) {
     return (
@@ -899,10 +630,6 @@ function App() {
     );
   }
 
-  // =====================================================
-  // LOGIN AND REGISTER
-  // =====================================================
-
   if (!loggedIn) {
     return (
       <div className="app">
@@ -911,53 +638,33 @@ function App() {
             {!showRegister ? (
               <>
                 <div className="auth-logo">✦</div>
-
                 <h1>API Test AI Generator</h1>
+                <p>Generate test-code files from OpenAPI specifications.</p>
 
-                <p>
-                  Generate test-code files from OpenAPI specifications.
-                </p>
-
-                <form
-                  onSubmit={handleLogin}
-                  className="auth-form"
-                >
+                <form onSubmit={handleLogin} className="auth-form">
                   <label>Email</label>
-
                   <input
                     type="email"
                     value={email}
-                    onChange={(event) =>
-                      setEmail(event.target.value)
-                    }
+                    onChange={(event) => setEmail(event.target.value)}
                     placeholder="Enter your email"
                     autoComplete="email"
                     required
                   />
 
                   <label>Password</label>
-
                   <input
                     type="password"
                     value={password}
-                    onChange={(event) =>
-                      setPassword(event.target.value)
-                    }
+                    onChange={(event) => setPassword(event.target.value)}
                     placeholder="Enter your password"
                     autoComplete="current-password"
                     required
                   />
 
-                  {loginError && (
-                    <div className="error-message">
-                      {loginError}
-                    </div>
-                  )}
+                  {loginError && <div className="error-message">{loginError}</div>}
 
-                  <button
-                    type="submit"
-                    disabled={loggingIn}
-                  >
+                  <button type="submit" disabled={loggingIn}>
                     {loggingIn ? "Signing in..." : "Sign In →"}
                   </button>
                 </form>
@@ -978,51 +685,35 @@ function App() {
             ) : (
               <>
                 <div className="auth-logo">✦</div>
-
                 <h1>Create Account</h1>
+                <p>Create a local account for this browser.</p>
 
-                <p>
-                  Create a local account for this browser.
-                </p>
-
-                <form
-                  onSubmit={handleRegister}
-                  className="auth-form"
-                >
+                <form onSubmit={handleRegister} className="auth-form">
                   <label>Name</label>
-
                   <input
                     type="text"
                     value={registerName}
-                    onChange={(event) =>
-                      setRegisterName(event.target.value)
-                    }
+                    onChange={(event) => setRegisterName(event.target.value)}
                     placeholder="Your name"
                     autoComplete="name"
                     required
                   />
 
                   <label>Email</label>
-
                   <input
                     type="email"
                     value={registerEmail}
-                    onChange={(event) =>
-                      setRegisterEmail(event.target.value)
-                    }
+                    onChange={(event) => setRegisterEmail(event.target.value)}
                     placeholder="Your email"
                     autoComplete="email"
                     required
                   />
 
                   <label>Password</label>
-
                   <input
                     type="password"
                     value={registerPassword}
-                    onChange={(event) =>
-                      setRegisterPassword(event.target.value)
-                    }
+                    onChange={(event) => setRegisterPassword(event.target.value)}
                     placeholder="Minimum 8 characters"
                     autoComplete="new-password"
                     minLength={8}
@@ -1030,15 +721,10 @@ function App() {
                   />
 
                   {registerError && (
-                    <div className="error-message">
-                      {registerError}
-                    </div>
+                    <div className="error-message">{registerError}</div>
                   )}
 
-                  <button
-                    type="submit"
-                    disabled={registering}
-                  >
+                  <button type="submit" disabled={registering}>
                     {registering ? "Creating..." : "Create Account →"}
                   </button>
                 </form>
@@ -1063,18 +749,11 @@ function App() {
     );
   }
 
-  // =====================================================
-  // MAIN APPLICATION
-  // =====================================================
-
   return (
     <div className="app dashboard-app">
-      {/* SIDEBAR */}
-
       <aside className="sidebar">
         <div className="sidebar-brand">
           <div className="brand-icon">✦</div>
-
           <div>
             <strong>API Test AI</strong>
             <span>Generator</span>
@@ -1082,48 +761,19 @@ function App() {
         </div>
 
         <nav className="sidebar-nav">
-          <button
-            className={`sidebar-link ${
-              activePage === "dashboard" ? "active" : ""
-            }`}
-            onClick={() => setActivePage("dashboard")}
-          >
+          <button className={`sidebar-link ${activePage === "dashboard" ? "active" : ""}`} onClick={() => setActivePage("dashboard")}>
             <span>⌂</span> Dashboard
           </button>
-
-          <button
-            className={`sidebar-link ${
-              activePage === "projects" ? "active" : ""
-            }`}
-            onClick={() => setActivePage("projects")}
-          >
+          <button className={`sidebar-link ${activePage === "projects" ? "active" : ""}`} onClick={() => setActivePage("projects")}>
             <span>▣</span> Projects
           </button>
-
-          <button
-            className={`sidebar-link ${
-              activePage === "apis" ? "active" : ""
-            }`}
-            onClick={() => setActivePage("apis")}
-          >
+          <button className={`sidebar-link ${activePage === "apis" ? "active" : ""}`} onClick={() => setActivePage("apis")}>
             <span>⌘</span> API Endpoints
           </button>
-
-          <button
-            className={`sidebar-link ${
-              activePage === "generator" ? "active" : ""
-            }`}
-            onClick={() => setActivePage("generator")}
-          >
+          <button className={`sidebar-link ${activePage === "generator" ? "active" : ""}`} onClick={() => setActivePage("generator")}>
             <span>✧</span> Test Generator
           </button>
-
-          <button
-            className={`sidebar-link ${
-              activePage === "history" ? "active" : ""
-            }`}
-            onClick={() => setActivePage("history")}
-          >
+          <button className={`sidebar-link ${activePage === "history" ? "active" : ""}`} onClick={() => setActivePage("history")}>
             <span>◷</span> Generation History
           </button>
         </nav>
@@ -1133,26 +783,17 @@ function App() {
             <div className="user-avatar">
               {(user?.email || "U").charAt(0).toUpperCase()}
             </div>
-
             <div>
-              <strong>
-                {user?.user_metadata?.name || "User"}
-              </strong>
-
+              <strong>{user?.user_metadata?.name || "User"}</strong>
               <span>{user?.email}</span>
             </div>
           </div>
 
-          <button
-            className="sidebar-logout"
-            onClick={handleLogout}
-          >
+          <button className="sidebar-logout" onClick={handleLogout}>
             Logout
           </button>
         </div>
       </aside>
-
-      {/* MAIN CONTENT */}
 
       <main className="dashboard-main">
         {activePage === "dashboard" && (
@@ -1177,9 +818,7 @@ function App() {
             setProjectDescription={setProjectDescription}
             setShowCreateProject={setShowCreateProject}
             handleCreateProject={handleCreateProject}
-            handleSelectProject={(project) =>
-              handleSelectProject(project.id)
-            }
+            handleSelectProject={(project) => handleSelectProject(project.id)}
           />
         )}
 
@@ -1202,7 +841,7 @@ function App() {
             apiRequestBody={apiRequestBody}
             apiError={apiError}
             apiLoading={apiLoading}
-           selectedFile={selectedFile}
+            selectedFile={selectedFile}
             importedApis={importedApis}
             uploadError={uploadError}
             uploading={uploading}
@@ -1212,9 +851,7 @@ function App() {
             handleCreateApi={handleCreateApi}
             handleFileChange={handleFileChange}
             handleImportOpenApi={handleImportOpenApi}
-            handleSelectProject={(project) =>
-              handleSelectProject(project.id)
-            }
+            handleSelectProject={(project) => handleSelectProject(project.id)}
           />
         )}
 
@@ -1233,6 +870,9 @@ function App() {
             handleLanguageChange={handleLanguageChange}
             generateTestCode={generateTestCode}
             handleDownload={handleDownload}
+            aiProgress={aiProgress}
+            aiAnalysis={aiAnalysis}
+            aiAnalysisIdeas={aiAnalysisIdeas}
           />
         )}
       </main>
